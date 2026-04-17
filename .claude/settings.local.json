@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s --output - http://crosspoint.local/files)",
+      "Bash(gunzip)",
+      "Bash(npm run *)",
+      "Bash(echo \"test\")",
+      "Bash(curl -v -F \"file=@/tmp/test.epub\" \"http://crosspoint.local/upload?path=/\")",
+      "Bash(curl -s \"http://crosspoint.local/api/status\")",
+      "Bash(curl -s --output - \"http://crosspoint.local/api/files?path=/\")",
+      "Bash(curl -s \"http://crosspoint.local/api/files?path=/\")",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

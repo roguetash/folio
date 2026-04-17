@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: file:;">
+<title>Folio</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <div class="logo">
+        <div class="logo-title">Folio</div>
+        <div class="logo-sub">your library</div>
+      </div>
+      <div class="nav">
+        <div class="nav-section">Library</div>
+        <div class="nav-items" id="filter-items"></div>
+        <div class="nav-section" style="margin-top:12px">Shelves</div>
+        <div class="nav-items" id="shelf-items"></div>
+        <div class="nav-section" style="margin-top:12px">Devices</div>
+        <div id="device-list"></div>
+      </div>
+      <div class="sidebar-footer">
+        <button class="settings-btn" id="settings-btn">⚙ Settings</button>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="toolbar">
+        <div class="search-wrap">
+          <span class="search-icon">&#9906;</span>
+          <input class="search-inp" id="search" placeholder="Search title, author, series...">
+        </div>
+        <div class="view-btns">
+          <button class="view-btn active" id="btn-grid">&#9632;&#9632;</button>
+          <button class="view-btn" id="btn-list">&#9776;</button>
+        </div>
+        <select class="sort-sel" id="sort-sel">
+          <option value="date_added">Recently added</option>
+          <option value="title">Title A to Z</option>
+          <option value="author">Author</option>
+          <option value="rating">Rating</option>
+        </select>
+        <button class="send-btn" id="send-btn" disabled>Send to device</button>
+        <button class="add-btn" id="import-btn">+ Import books</button>
+      </div>
+      <div class="selection-bar" id="sel-bar">
+        <span id="sel-count">0 selected</span>
+        <button class="clear-sel" id="clear-sel">clear</button>
+      </div>
+      <div id="reading-widget"></div>
+      <div class="content" id="book-list"></div>
+      <div class="stats-bar" id="stats-bar"></div>
+    </div>
+
+    <div class="detail-panel" id="detail-panel"></div>
+  </div>
+
+  <div class="drop-overlay" id="drop-overlay">
+    <div class="drop-target">
+      <div class="drop-target-title">Drop to import</div>
+      <div class="drop-target-sub">EPUB · MOBI · AZW3 · PDF</div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
