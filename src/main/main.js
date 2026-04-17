@@ -424,8 +424,10 @@ ipcMain.handle('devices:send', async (e, { bookIds, deviceId }) => {
     let tempPath = null;
     try {
       let srcPath = book.file_path;
-      if (device.brand === 'kindle' && book.file_format === 'EPUB') {
-        tempPath = await convertEpubToMobi(srcPath);
+      const KINDLE_NATIVE = new Set(['MOBI', 'AZW3']);
+      if (device.brand === 'kindle' && !KINDLE_NATIVE.has(book.file_format)) {
+        const targetFormat = (device.preferred_format || 'MOBI').toUpperCase();
+        tempPath = await convertToFormat(srcPath, targetFormat);
         srcPath = tempPath;
       }
       if (isXteink) {
@@ -445,12 +447,13 @@ ipcMain.handle('devices:send', async (e, { bookIds, deviceId }) => {
   return { ok: true, results };
 });
 
-function convertEpubToMobi(srcPath) {
+function convertToFormat(srcPath, targetFormat) {
   return new Promise((resolve, reject) => {
     const baseName = path.basename(srcPath, path.extname(srcPath));
-    const outPath = path.join(os.tmpdir(), `${Date.now()}_${baseName}.mobi`);
+    const ext = targetFormat.toLowerCase();
+    const outPath = path.join(os.tmpdir(), `${Date.now()}_${baseName}.${ext}`);
     execFile('ebook-convert', [srcPath, outPath], (err) => {
-      if (err) return reject(new Error(`ebook-convert failed: ${err.message}`));
+      if (err) return reject(new Error(`ebook-convert failed (${targetFormat}): ${err.message}`));
       resolve(outPath);
     });
   });
@@ -523,6 +526,21 @@ ipcMain.handle('book:open-file', (e, id) => {
     return { ok: true };
   }
   return { ok: false, error: 'File missing' };
+});
+
+ipcMain.handle('book:open-in-koreader', (e, id) => {
+  const KOREADER_PATH = '/Applications/KOReader.app';
+  if (!fs.existsSync(KOREADER_PATH)) {
+    return { ok: false, error: 'KOReader is not installed. Download it from koreader.rocks.' };
+  }
+  const book = db.prepare('SELECT file_path FROM books WHERE id=?').get(id);
+  if (!book || !book.file_path || !fs.existsSync(book.file_path)) {
+    return { ok: false, error: 'File missing' };
+  }
+  execFile('open', ['-a', KOREADER_PATH, book.file_path], err => {
+    if (err) console.error('KOReader launch failed:', err.message);
+  });
+  return { ok: true };
 });
 
 ipcMain.handle('book:reveal-file', (e, id) => {

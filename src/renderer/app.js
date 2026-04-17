@@ -313,6 +313,7 @@ function renderDetail() {
       <button class="save-btn" id="save-btn">Save changes</button>
       <button class="secondary-btn" id="send-single-btn">Send to device</button>
       <button class="secondary-btn" id="open-file-btn">Open file in reader</button>
+      <button class="secondary-btn" id="open-koreader-btn">Open in KOReader</button>
       <button class="secondary-btn" id="reveal-file-btn">Show in Finder</button>
       <button class="danger-btn" id="delete-btn">Remove from library</button>
     </div>`;
@@ -360,6 +361,10 @@ function renderDetail() {
     openSendModal();
   };
   $('open-file-btn').onclick = () => window.folio.books.openFile(state.selected);
+  $('open-koreader-btn').onclick = async () => {
+    const r = await window.folio.books.openInKoreader(state.selected);
+    if (!r.ok) alert(r.error);
+  };
   $('reveal-file-btn').onclick = () => window.folio.books.revealFile(state.selected);
   $('delete-btn').onclick = async () => {
     if (!confirm(`Remove "${state.editData.title}" from your library? The file will also be deleted.`)) return;
@@ -440,14 +445,21 @@ function showTransferPreview(deviceId) {
     <div class="modal-body">
       <div class="modal-section">
         <div class="modal-section-label">Books</div>
-        ${selBooks.map(b => `
-          <div class="book-preview">
+        ${selBooks.map(b => {
+          const KINDLE_NATIVE = new Set(['MOBI', 'AZW3']);
+          const targetFmt = (device.preferred_format || 'MOBI').toUpperCase();
+          const needsConvert = device.brand === 'kindle' && !KINDLE_NATIVE.has(b.file_format);
+          const badge = needsConvert
+            ? `<span class="preview-status preview-convert">${b.file_format} → ${targetFmt}</span>`
+            : `<span class="preview-status preview-ready">Ready</span>`;
+          return `<div class="book-preview">
             <div class="preview-info">
               <div class="preview-title">${escapeHtml(b.title)}</div>
               <div class="preview-meta">${escapeHtml(b.author || '')} · ${b.file_format || ''}</div>
             </div>
-            <span class="preview-status preview-ready">Ready</span>
-          </div>`).join('')}
+            ${badge}
+          </div>`;
+        }).join('')}
       </div>
       ${device.brand === 'kindle' && device.kindle_email
       ? `<div class="transfer-options">

@@ -8,7 +8,8 @@ contextBridge.exposeInMainWorld('folio', {
     import: () => ipcRenderer.invoke('books:import'),
     importPaths: (paths) => ipcRenderer.invoke('books:import-paths', paths),
     openFile: (id) => ipcRenderer.invoke('book:open-file', id),
-    revealFile: (id) => ipcRenderer.invoke('book:reveal-file', id)
+    revealFile: (id) => ipcRenderer.invoke('book:reveal-file', id),
+    openInKoreader: (id) => ipcRenderer.invoke('book:open-in-koreader', id)
   },
   devices: {
     list: () => ipcRenderer.invoke('devices:list'),
