@@ -20,7 +20,10 @@ contextBridge.exposeInMainWorld('folio', {
     send: (bookIds, deviceId, folderOverride) => ipcRenderer.invoke('devices:send', { bookIds, deviceId, folderOverride }),
     listFolders: (deviceId, subpath) => ipcRenderer.invoke('devices:list-folders', { deviceId, subpath }),
     syncKoreader: (deviceId) => ipcRenderer.invoke('devices:sync-koreader', deviceId),
-    scanBooks: (deviceId) => ipcRenderer.invoke('devices:scan-books', deviceId)
+    scanBooks: (deviceId) => ipcRenderer.invoke('devices:scan-books', deviceId),
+    listBooks: (deviceId) => ipcRenderer.invoke('devices:list-books', deviceId),
+    removeBook: (deviceId, devicePath) => ipcRenderer.invoke('devices:remove-book', { deviceId, devicePath }),
+    importFromDevice: (devicePath) => ipcRenderer.invoke('devices:import-from-device', devicePath)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

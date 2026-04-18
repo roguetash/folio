@@ -469,6 +469,74 @@ ipcMain.handle('devices:add', (e, device) => {
   return { ok: true, id: result.lastInsertRowid };
 });
 
+ipcMain.handle('devices:list-books', (e, deviceId) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, books: [] };
+  if (device.brand === 'xteink') return { ok: false, error: 'Wireless scan not supported', books: [] };
+  if (!device.mount_path || !fs.existsSync(device.mount_path)) {
+    return { ok: false, error: 'Device not connected', books: [] };
+  }
+
+  const relFolder = (device.books_folder || '').replace(/^\/+/, '');
+  const scanRoot = relFolder ? path.join(device.mount_path, relFolder) : device.mount_path;
+  const BOOK_EXTS = new Set(['epub', 'mobi', 'azw3', 'kepub', 'pdf']);
+  const results = [];
+
+  const scanDir = (dirPath, rel, depth) => {
+    if (depth > 4) return;
+    let entries;
+    try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name.endsWith('.sdr')) continue;
+      if (entry.isDirectory()) {
+        scanDir(path.join(dirPath, entry.name), rel ? `${rel}/${entry.name}` : entry.name, depth + 1);
+        continue;
+      }
+      const ext = path.extname(entry.name).slice(1).toLowerCase();
+      if (!BOOK_EXTS.has(ext)) continue;
+      const fullPath = path.join(dirPath, entry.name);
+      let size = 0;
+      try { size = fs.statSync(fullPath).size; } catch {}
+      const localBook = db.prepare(
+        'SELECT id, title, author, cover_path, status, rating FROM books WHERE file_path LIKE ?'
+      ).get(`%${entry.name}`);
+      results.push({
+        devicePath: fullPath,
+        filename: entry.name,
+        folder: rel || '/',
+        size,
+        localBookId: localBook ? localBook.id : null,
+        localBook: localBook || null
+      });
+    }
+  };
+
+  scanDir(scanRoot, '', 0);
+  return { ok: true, books: results };
+});
+
+ipcMain.handle('devices:remove-book', (e, { deviceId, devicePath }) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, error: 'Device not found' };
+  if (!devicePath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+  try {
+    fs.unlinkSync(devicePath);
+    const sdrDir = devicePath + '.sdr';
+    if (fs.existsSync(sdrDir)) fs.rmSync(sdrDir, { recursive: true, force: true });
+    const filename = path.basename(devicePath);
+    const localBook = db.prepare("SELECT id FROM books WHERE file_path LIKE ?").get(`%${filename}`);
+    if (localBook) db.prepare('DELETE FROM book_devices WHERE book_id=? AND device_id=?').run(localBook.id, deviceId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('devices:import-from-device', async (e, devicePath) => {
+  const result = await importFilePaths([devicePath]);
+  return result;
+});
+
 ipcMain.handle('devices:scan-books', (e, deviceId) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, bookIds: [] };

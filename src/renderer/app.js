@@ -104,12 +104,15 @@ function renderSidebar() {
       : (d.connected ? `Connected${krTag}` : 'Disconnected');
     const countBadge = isActive && state.deviceBooks.size > 0
       ? `<span class="device-book-count">${state.deviceBooks.size}</span>` : '';
+    const viewBtn = isActive && d.connected
+      ? `<button class="device-view-btn" data-view="${d.id}" title="View device library">↕</button>` : '';
     return `<div class="device-item${cls}" data-device="${d.id}">
       <div class="device-ind"></div>
       <div class="device-info">
         <div class="device-name">${d.name}${countBadge}</div>
         <div class="device-status">${isActive ? `Showing ${state.deviceBooks.size} book${state.deviceBooks.size !== 1 ? 's' : ''} on device` : status}</div>
       </div>
+      ${viewBtn}
       <button class="device-cfg-btn" data-cfg="${d.id}" title="Configure">⚙</button>
     </div>`;
   }).join('') + `<button class="add-device-btn" id="add-device-btn">+ Add device</button>`;
@@ -122,6 +125,9 @@ function renderSidebar() {
   });
   $('device-list').querySelectorAll('.device-cfg-btn').forEach(btn => {
     btn.onclick = e => { e.stopPropagation(); openDeviceConfig(parseInt(btn.dataset.cfg)); };
+  });
+  $('device-list').querySelectorAll('.device-view-btn').forEach(btn => {
+    btn.onclick = e => { e.stopPropagation(); openDeviceLibraryModal(parseInt(btn.dataset.view)); };
   });
   const addBtn = $('add-device-btn');
   if (addBtn) addBtn.onclick = openAddDeviceModal;
@@ -667,6 +673,192 @@ function showToast(type, message) {
   const dismiss = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 320); };
   t.querySelector('.toast-close').onclick = dismiss;
   setTimeout(dismiss, duration);
+}
+
+async function openDeviceLibraryModal(deviceId) {
+  const device = state.devices.find(d => d.id === deviceId);
+  if (!device) return;
+  const modal = $('modal');
+
+  const renderModal = async () => {
+    modal.innerHTML = `
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">Device library · ${escapeHtml(device.name)}</div>
+          <div class="modal-sub" id="dl-sub">Scanning device…</div>
+        </div>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="dl-body" style="padding:0">
+        <div class="folder-loading" style="padding:24px">Scanning…</div>
+      </div>
+      <div class="modal-foot" id="dl-foot" style="display:none"></div>`;
+    $('overlay').classList.add('show');
+    $('modal-close').onclick = closeModal;
+
+    const r = await window.folio.devices.listBooks(deviceId);
+    if (!r.ok) {
+      $('dl-sub').textContent = r.error || 'Could not scan device';
+      $('dl-body').innerHTML = `<div class="folder-empty" style="padding:24px">${escapeHtml(r.error || 'Unknown error')}</div>`;
+      return;
+    }
+
+    const books = r.books;
+    $('dl-sub').textContent = `${books.length} book${books.length !== 1 ? 's' : ''} on device`;
+
+    let filter = 'all';
+    let selected = new Set();
+
+    const render = () => {
+      const visible = books.filter(b => {
+        if (filter === 'matched') return !!b.localBookId;
+        if (filter === 'unmatched') return !b.localBookId;
+        return true;
+      });
+
+      $('dl-body').innerHTML = `
+        <div class="dl-toolbar">
+          <div class="dl-filters">
+            <button class="dl-filter-btn${filter === 'all' ? ' active' : ''}" data-f="all">All (${books.length})</button>
+            <button class="dl-filter-btn${filter === 'matched' ? ' active' : ''}" data-f="matched">In library (${books.filter(b => b.localBookId).length})</button>
+            <button class="dl-filter-btn${filter === 'unmatched' ? ' active' : ''}" data-f="unmatched">Not in library (${books.filter(b => !b.localBookId).length})</button>
+          </div>
+          <div class="dl-sel-actions">
+            <button class="dl-sel-btn" id="dl-sel-all">Select all</button>
+            <button class="dl-sel-btn" id="dl-sel-none">Deselect</button>
+          </div>
+        </div>
+        <div class="dl-list">
+          ${visible.map((b, i) => {
+            const isSelected = selected.has(b.devicePath);
+            const title = b.localBook ? escapeHtml(b.localBook.title) : escapeHtml(b.filename);
+            const author = b.localBook ? escapeHtml(b.localBook.author || '') : '';
+            const folder = b.folder !== '/' ? `<span class="dl-folder">${escapeHtml(b.folder)}</span>` : '';
+            const matchBadge = b.localBookId
+              ? `<span class="dl-badge dl-badge-in">in library</span>`
+              : `<span class="dl-badge dl-badge-out">not in library</span>`;
+            const importBtn = !b.localBookId
+              ? `<button class="dl-action-btn dl-import" data-path="${escapeHtml(b.devicePath)}" title="Import to library">↓ Import</button>` : '';
+            const removeBtn = `<button class="dl-action-btn dl-remove" data-path="${escapeHtml(b.devicePath)}" title="Remove from device">🗑</button>`;
+            return `<div class="dl-row${isSelected ? ' selected' : ''}" data-path="${escapeHtml(b.devicePath)}">
+              <div class="dl-check${isSelected ? ' checked' : ''}" data-chk="${escapeHtml(b.devicePath)}">✓</div>
+              <div class="dl-info">
+                <div class="dl-title">${title}${folder}</div>
+                ${author ? `<div class="dl-author">${author}</div>` : ''}
+              </div>
+              ${matchBadge}
+              <div class="dl-actions">${importBtn}${removeBtn}</div>
+            </div>`;
+          }).join('')}
+          ${visible.length === 0 ? `<div class="folder-empty" style="padding:20px">No books match this filter</div>` : ''}
+        </div>`;
+
+      const foot = $('dl-foot');
+      if (selected.size > 0) {
+        foot.style.display = 'flex';
+        const canImport = [...selected].some(p => {
+          const b = books.find(x => x.devicePath === p);
+          return b && !b.localBookId;
+        });
+        foot.innerHTML = `
+          <span style="font-size:12px;color:var(--text2);margin-right:auto">${selected.size} selected</span>
+          ${canImport ? `<button class="btn-ghost" id="dl-bulk-import">↓ Import to library</button>` : ''}
+          <button class="danger-btn" id="dl-bulk-remove" style="width:auto;margin:0">Remove from device</button>`;
+
+        if (canImport) {
+          $('dl-bulk-import').onclick = async () => {
+            const paths = [...selected].filter(p => books.find(x => x.devicePath === p && !x.localBookId));
+            let imported = 0;
+            for (const p of paths) {
+              const r = await window.folio.devices.importFromDevice(p);
+              if (r && r.imported) imported += r.imported;
+            }
+            selected.clear();
+            showToast('success', `Imported ${imported} book${imported !== 1 ? 's' : ''}`);
+            await loadAll();
+            await renderModal();
+          };
+        }
+        $('dl-bulk-remove').onclick = async () => {
+          if (!confirm(`Remove ${selected.size} book${selected.size !== 1 ? 's' : ''} from device? This cannot be undone.`)) return;
+          let removed = 0;
+          for (const p of [...selected]) {
+            const r = await window.folio.devices.removeBook(deviceId, p);
+            if (r.ok) removed++;
+          }
+          selected.clear();
+          showToast('success', `Removed ${removed} book${removed !== 1 ? 's' : ''} from device`);
+          if (state.activeDevice === deviceId) {
+            const scan = await window.folio.devices.scanBooks(deviceId);
+            if (scan.ok) state.deviceBooks = new Set(scan.bookIds);
+          }
+          await loadAll();
+          await renderModal();
+        };
+      } else {
+        foot.style.display = 'none';
+      }
+
+      $('dl-body').querySelectorAll('.dl-filter-btn').forEach(btn => {
+        btn.onclick = () => { filter = btn.dataset.f; render(); };
+      });
+      $('dl-sel-all') && ($('dl-sel-all').onclick = () => {
+        visible.forEach(b => selected.add(b.devicePath));
+        render();
+      });
+      $('dl-sel-none') && ($('dl-sel-none').onclick = () => { selected.clear(); render(); });
+
+      $('dl-body').querySelectorAll('.dl-check').forEach(el => {
+        el.onclick = e => {
+          e.stopPropagation();
+          const p = el.dataset.chk;
+          if (selected.has(p)) selected.delete(p); else selected.add(p);
+          render();
+        };
+      });
+      $('dl-body').querySelectorAll('.dl-import').forEach(btn => {
+        btn.onclick = async e => {
+          e.stopPropagation();
+          btn.textContent = 'Importing…';
+          btn.disabled = true;
+          const r = await window.folio.devices.importFromDevice(btn.dataset.path);
+          if (r && r.imported) {
+            showToast('success', 'Imported to library');
+            await loadAll();
+            await renderModal();
+          } else {
+            btn.textContent = '↓ Import';
+            btn.disabled = false;
+          }
+        };
+      });
+      $('dl-body').querySelectorAll('.dl-remove').forEach(btn => {
+        btn.onclick = async e => {
+          e.stopPropagation();
+          if (!confirm(`Remove "${escapeHtml(btn.closest('.dl-row').querySelector('.dl-title').textContent)}" from device?`)) return;
+          btn.textContent = '…';
+          btn.disabled = true;
+          const r = await window.folio.devices.removeBook(deviceId, btn.dataset.path);
+          if (r.ok) {
+            showToast('success', 'Removed from device');
+            if (state.activeDevice === deviceId) {
+              const scan = await window.folio.devices.scanBooks(deviceId);
+              if (scan.ok) { state.deviceBooks = new Set(scan.bookIds); renderSidebar(); renderBooks(); }
+            }
+            await loadAll();
+            await renderModal();
+          } else {
+            showToast('error', r.error || 'Failed to remove');
+            btn.textContent = '🗑'; btn.disabled = false;
+          }
+        };
+      });
+    };
+
+    render();
+  };
+
+  renderModal();
 }
 
 function openAddDeviceModal() {

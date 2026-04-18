@@ -218,6 +218,38 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow:hi
 .device-type-btn{background:none;border:1px solid var(--ink3);color:var(--text2);font-family:var(--sans);font-size:12px;padding:6px 14px;border-radius:20px;cursor:pointer;transition:.15s}
 .device-type-btn:hover{border-color:var(--lavender);color:var(--text)}
 .device-type-btn.active{background:rgba(255,105,180,.12);border-color:var(--pink);color:var(--pink2)}
+.device-view-btn{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:5px;opacity:0;transition:.15s;flex-shrink:0}
+.device-item:hover .device-view-btn{opacity:1}
+.device-item.active .device-view-btn{opacity:.7}
+.device-view-btn:hover{color:var(--lavender);background:var(--ink3)}
+
+/* Device library modal */
+.dl-toolbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--ink3);gap:12px;flex-wrap:wrap}
+.dl-filters{display:flex;gap:4px}
+.dl-filter-btn{background:none;border:1px solid var(--ink3);color:var(--text3);font-family:var(--sans);font-size:11px;padding:4px 10px;border-radius:20px;cursor:pointer;transition:.15s}
+.dl-filter-btn:hover{border-color:var(--lavender);color:var(--text2)}
+.dl-filter-btn.active{background:rgba(255,105,180,.12);border-color:var(--pink);color:var(--pink2)}
+.dl-sel-actions{display:flex;gap:6px}
+.dl-sel-btn{background:none;border:none;color:var(--text3);font-family:var(--sans);font-size:11px;cursor:pointer;text-decoration:underline;padding:0}
+.dl-sel-btn:hover{color:var(--text2)}
+.dl-list{overflow-y:auto;max-height:380px}
+.dl-row{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.04);transition:.12s;cursor:default}
+.dl-row:hover{background:rgba(255,255,255,.03)}
+.dl-row.selected{background:rgba(196,168,224,.06)}
+.dl-check{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--text3);display:flex;align-items:center;justify-content:center;font-size:10px;color:transparent;flex-shrink:0;cursor:pointer;transition:.12s}
+.dl-check:hover{border-color:var(--lavender)}
+.dl-check.checked{background:var(--pink);border-color:var(--pink);color:#fff}
+.dl-info{flex:1;min-width:0}
+.dl-title{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.dl-author{font-size:11px;color:var(--text3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl-folder{font-size:10px;color:var(--text3);background:var(--ink3);padding:1px 6px;border-radius:4px;flex-shrink:0}
+.dl-badge{font-size:9px;padding:2px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0}
+.dl-badge-in{background:rgba(127,255,212,.1);color:var(--mint);border:1px solid rgba(127,255,212,.2)}
+.dl-badge-out{background:rgba(196,168,224,.1);color:var(--lavender);border:1px solid rgba(196,168,224,.2)}
+.dl-actions{display:flex;gap:5px;flex-shrink:0}
+.dl-action-btn{background:none;border:1px solid var(--ink3);color:var(--text3);font-family:var(--sans);font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;transition:.12s;white-space:nowrap}
+.dl-import:hover{border-color:var(--mint);color:var(--mint)}
+.dl-remove:hover{border-color:var(--coral);color:var(--coral)}
 .err-banner{padding:10px 12px;background:rgba(255,127,112,.1);border:1px solid rgba(255,127,112,.25);border-radius:8px;color:var(--coral);font-size:12px;margin-bottom:12px}
 .transfer-options{display:flex;gap:8px;margin-top:12px}
 .transfer-opt{flex:1;padding:10px 12px;background:var(--ink);border:1px solid var(--ink3);border-radius:10px;cursor:pointer;transition:.15s}

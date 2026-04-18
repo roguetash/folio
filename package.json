@@ -23,11 +23,19 @@
     "productName": "Tome",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": "dmg",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSRemovableVolumesUsageDescription": "Tome needs access to your connected reader to send, manage, and organise books on the device.",
+        "NSDesktopFolderUsageDescription": "Tome needs access to read ebook files from your Desktop.",
+        "NSDocumentsFolderUsageDescription": "Tome needs access to read ebook files from your Documents folder.",
+        "NSDownloadsFolderUsageDescription": "Tome needs access to read ebook files from your Downloads folder."
+      }
     },
     "files": [
       "src/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "build/**/*"
     ]
   }
 }
