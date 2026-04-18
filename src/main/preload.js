@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('folio', {
     delete: (id) => ipcRenderer.invoke('books:delete', id),
     import: () => ipcRenderer.invoke('books:import'),
     importPaths: (paths) => ipcRenderer.invoke('books:import-paths', paths),
+    findDuplicates: () => ipcRenderer.invoke('books:find-duplicates'),
     openFile: (id) => ipcRenderer.invoke('book:open-file', id),
     revealFile: (id) => ipcRenderer.invoke('book:reveal-file', id),
     openInKoreader: (id) => ipcRenderer.invoke('book:open-in-koreader', id)
@@ -14,7 +15,10 @@ contextBridge.exposeInMainWorld('folio', {
   devices: {
     list: () => ipcRenderer.invoke('devices:list'),
     update: (device) => ipcRenderer.invoke('devices:update', device),
-    send: (bookIds, deviceId) => ipcRenderer.invoke('devices:send', { bookIds, deviceId })
+    delete: (id) => ipcRenderer.invoke('devices:delete', id),
+    send: (bookIds, deviceId, folderOverride) => ipcRenderer.invoke('devices:send', { bookIds, deviceId, folderOverride }),
+    listFolders: (deviceId, subpath) => ipcRenderer.invoke('devices:list-folders', { deviceId, subpath }),
+    syncKoreader: (deviceId) => ipcRenderer.invoke('devices:sync-koreader', deviceId)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

@@ -5,9 +5,13 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 const { execFile } = require('child_process');
+const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const Database = require('better-sqlite3');
 const EPub = require('epub2').EPub;
+
+// Keep userData pointing to 'folio' so data survives a productName change
+app.setPath('userData', path.join(app.getPath('appData'), 'folio'));
 
 let db;
 let mainWindow;
@@ -42,6 +46,7 @@ function initDatabase() {
       file_path TEXT NOT NULL,
       file_format TEXT,
       file_size INTEGER,
+      file_hash TEXT,
       cover_path TEXT,
       status TEXT DEFAULT 'tbr',
       rating INTEGER DEFAULT 0,
@@ -82,6 +87,8 @@ function initDatabase() {
   `);
 
   try { db.exec('ALTER TABLE books ADD COLUMN progress INTEGER DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN uses_koreader INTEGER DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE books ADD COLUMN file_hash TEXT'); } catch {}
 
   const deviceCount = db.prepare('SELECT COUNT(*) as n FROM devices').get().n;
   if (deviceCount === 0) {
@@ -179,13 +186,60 @@ ipcMain.handle('books:delete', (e, id) => {
   return { ok: true };
 });
 
+ipcMain.handle('books:find-duplicates', () => {
+  const books = db.prepare('SELECT * FROM books ORDER BY title, author, date_added').all();
+
+  // Group by exact file hash
+  const byHash = {};
+  for (const b of books) {
+    if (!b.file_hash) continue;
+    if (!byHash[b.file_hash]) byHash[b.file_hash] = [];
+    byHash[b.file_hash].push(b);
+  }
+
+  // Group by normalised title + author
+  const byTitleAuthor = {};
+  for (const b of books) {
+    const key = `${(b.title || '').toLowerCase().trim()}|${(b.author || '').toLowerCase().trim()}`;
+    if (!byTitleAuthor[key]) byTitleAuthor[key] = [];
+    byTitleAuthor[key].push(b);
+  }
+
+  const groups = [];
+  const usedIds = new Set();
+
+  for (const group of Object.values(byHash)) {
+    if (group.length < 2) continue;
+    groups.push({ type: 'exact', books: group });
+    group.forEach(b => usedIds.add(b.id));
+  }
+  for (const group of Object.values(byTitleAuthor)) {
+    if (group.length < 2) continue;
+    const fresh = group.filter(b => !usedIds.has(b.id));
+    if (fresh.length >= 2) groups.push({ type: 'title_author', books: fresh });
+  }
+
+  return groups;
+});
+
 async function importFilePaths(filePaths) {
   const booksDir = path.join(getDataDir(), 'books');
   const coversDir = path.join(getDataDir(), 'covers');
   let imported = 0;
+  const skipped = [];
 
   for (const srcPath of filePaths) {
     try {
+      // Exact duplicate check via file hash
+      let fileHash = null;
+      try {
+        fileHash = crypto.createHash('sha256').update(fs.readFileSync(srcPath)).digest('hex');
+      } catch {}
+      if (fileHash) {
+        const exact = db.prepare('SELECT title FROM books WHERE file_hash=?').get(fileHash);
+        if (exact) { skipped.push({ file: path.basename(srcPath), reason: 'exact', match: exact.title }); continue; }
+      }
+
       const ext = path.extname(srcPath).slice(1).toUpperCase();
       const destName = `${Date.now()}_${path.basename(srcPath)}`;
       const destPath = path.join(booksDir, destName);
@@ -225,16 +279,24 @@ async function importFilePaths(filePaths) {
         }
       }
 
+      // Title + author duplicate check (warn level — different editions still import)
+      if (title && author) {
+        const titleDupe = db.prepare(
+          'SELECT id FROM books WHERE LOWER(TRIM(title))=? AND LOWER(TRIM(COALESCE(author,"")))=?'
+        ).get(title.toLowerCase().trim(), author.toLowerCase().trim());
+        if (titleDupe) { skipped.push({ file: path.basename(srcPath), reason: 'title_author', match: title }); continue; }
+      }
+
       db.prepare(`
-        INSERT INTO books (title, author, publisher, published_year, isbn, language, description, file_path, file_format, file_size, cover_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(title, author, publisher, publishedYear, isbn, language, description, destPath, ext, stats.size, coverPath);
+        INSERT INTO books (title, author, publisher, published_year, isbn, language, description, file_path, file_format, file_size, file_hash, cover_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(title, author, publisher, publishedYear, isbn, language, description, destPath, ext, stats.size, fileHash, coverPath);
       imported++;
     } catch (err) {
       console.error('Import failed for', srcPath, err);
     }
   }
-  return { imported };
+  return { imported, skipped };
 }
 
 ipcMain.handle('books:import', async () => {
@@ -390,17 +452,110 @@ ipcMain.handle('devices:list', async () => {
 
 ipcMain.handle('devices:update', (e, device) => {
   db.prepare(`
-    UPDATE devices SET name=?, mount_path=?, books_folder=?, preferred_format=?, kindle_email=?
+    UPDATE devices SET name=?, mount_path=?, books_folder=?, preferred_format=?, kindle_email=?, uses_koreader=?
     WHERE id=?
-  `).run(device.name, device.mount_path, device.books_folder, device.preferred_format, device.kindle_email, device.id);
+  `).run(device.name, device.mount_path, device.books_folder, device.preferred_format, device.kindle_email, device.uses_koreader ? 1 : 0, device.id);
   return { ok: true };
 });
 
-ipcMain.handle('devices:send', async (e, { bookIds, deviceId }) => {
+ipcMain.handle('devices:delete', (e, id) => {
+  db.prepare('DELETE FROM book_devices WHERE device_id=?').run(id);
+  db.prepare('DELETE FROM devices WHERE id=?').run(id);
+  return { ok: true };
+});
+
+function listXteinkFolders(host, folderPath) {
+  return new Promise(resolve => {
+    const req = http.get({
+      hostname: normalizeXteinkHost(host), port: 80,
+      path: `/api/files?path=${encodeURIComponent(folderPath || '/')}`,
+      timeout: 3000
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          let folders = [];
+          if (Array.isArray(json)) {
+            folders = json.filter(i => i.type === 'directory' || i.isDir || i.dir === true)
+                          .map(i => i.name || i.filename).filter(Boolean);
+          } else if (json.dirs && Array.isArray(json.dirs)) {
+            folders = json.dirs;
+          } else if (json.files && Array.isArray(json.files)) {
+            folders = json.files.filter(f => f.type === 'dir' || f.isDirectory).map(f => f.name).filter(Boolean);
+          }
+          resolve(folders);
+        } catch { resolve([]); }
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+  });
+}
+
+ipcMain.handle('devices:list-folders', async (e, { deviceId, subpath }) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, error: 'Device not found', folders: [] };
+
+  if (device.brand === 'xteink') {
+    if (!device.mount_path) return { ok: true, folders: [] };
+    const folders = await listXteinkFolders(device.mount_path, subpath || '/');
+    return { ok: true, folders };
+  }
+
+  if (!device.mount_path || !fs.existsSync(device.mount_path)) {
+    return { ok: false, error: 'Device not connected', folders: [] };
+  }
+  const relPath = (subpath || '').replace(/^\/+/, '');
+  const scanPath = relPath ? path.join(device.mount_path, relPath) : device.mount_path;
+  try {
+    const entries = fs.readdirSync(scanPath, { withFileTypes: true });
+    const folders = entries.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name);
+    return { ok: true, folders };
+  } catch (err) {
+    return { ok: false, error: err.message, folders: [] };
+  }
+});
+
+ipcMain.handle('devices:sync-koreader', async (e, deviceId) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device || !device.mount_path || !fs.existsSync(device.mount_path)) {
+    return { ok: false, error: 'Device not connected.' };
+  }
+  const folder = path.join(device.mount_path, device.books_folder || '');
+  let entries;
+  try { entries = fs.readdirSync(folder); } catch {
+    return { ok: false, error: 'Cannot read device folder.' };
+  }
+
+  const sdrDirs = entries.filter(e => e.endsWith('.sdr'));
+  let updated = 0;
+  for (const sdr of sdrDirs) {
+    const bookFilename = sdr.slice(0, -4);
+    const ext = path.extname(bookFilename).slice(1).toLowerCase();
+    const luaPath = path.join(folder, sdr, `metadata.${ext}.lua`);
+    if (!fs.existsSync(luaPath)) continue;
+    try {
+      const lua = fs.readFileSync(luaPath, 'utf8');
+      const m = lua.match(/\["percent_finished"\]\s*=\s*([\d.]+)/);
+      if (!m) continue;
+      const progress = Math.round(parseFloat(m[1]) * 100);
+      const book = db.prepare("SELECT id FROM books WHERE file_path LIKE ?").get(`%${bookFilename}`);
+      if (!book) continue;
+      db.prepare('UPDATE books SET progress=? WHERE id=?').run(progress, book.id);
+      updated++;
+    } catch {}
+  }
+  return { ok: true, updated };
+});
+
+ipcMain.handle('devices:send', async (e, { bookIds, deviceId, folderOverride }) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, error: 'Device not found' };
 
   const isXteink = device.brand === 'xteink';
+  const effectiveFolder = folderOverride !== undefined ? folderOverride : (device.books_folder || '/');
 
   if (isXteink) {
     if (!device.mount_path) return { ok: false, error: 'No device address set. Configure it in device settings.' };
@@ -409,12 +564,16 @@ ipcMain.handle('devices:send', async (e, { bookIds, deviceId }) => {
     if (!device.mount_path || !fs.existsSync(device.mount_path)) {
       return { ok: false, error: 'Device not connected. Plug it in and try again.' };
     }
-    const destFolder = path.join(device.mount_path, device.books_folder || '');
-    if (!fs.existsSync(destFolder)) {
-      try { fs.mkdirSync(destFolder, { recursive: true }); }
+    const relFolder = (effectiveFolder || '').replace(/^\/+/, '');
+    const destFolderPath = relFolder ? path.join(device.mount_path, relFolder) : device.mount_path;
+    if (!fs.existsSync(destFolderPath)) {
+      try { fs.mkdirSync(destFolderPath, { recursive: true }); }
       catch (err) { return { ok: false, error: 'Could not access folder: ' + err.message }; }
     }
   }
+
+  const relFolder = (effectiveFolder || '').replace(/^\/+/, '');
+  const destFolderPath = isXteink ? null : (relFolder ? path.join(device.mount_path, relFolder) : device.mount_path);
 
   const results = [];
   const linkStmt = db.prepare('INSERT OR IGNORE INTO book_devices (book_id, device_id) VALUES (?, ?)');
@@ -431,10 +590,9 @@ ipcMain.handle('devices:send', async (e, { bookIds, deviceId }) => {
         srcPath = tempPath;
       }
       if (isXteink) {
-        await uploadToXteink(device.mount_path, device.books_folder || '/', srcPath);
+        await uploadToXteink(device.mount_path, effectiveFolder || '/', srcPath);
       } else {
-        const destFolder = path.join(device.mount_path, device.books_folder || '');
-        fs.copyFileSync(srcPath, path.join(destFolder, path.basename(srcPath)));
+        fs.copyFileSync(srcPath, path.join(destFolderPath, path.basename(srcPath)));
       }
       linkStmt.run(bookId, deviceId);
       results.push({ id: bookId, ok: true });
@@ -453,7 +611,12 @@ function convertToFormat(srcPath, targetFormat) {
     const ext = targetFormat.toLowerCase();
     const outPath = path.join(os.tmpdir(), `${Date.now()}_${baseName}.${ext}`);
     execFile('ebook-convert', [srcPath, outPath], (err) => {
-      if (err) return reject(new Error(`ebook-convert failed (${targetFormat}): ${err.message}`));
+      if (err) {
+        const msg = err.code === 'ENOENT'
+          ? 'Calibre not found — install Calibre to convert formats (calibre-ebook.com)'
+          : `Conversion to ${targetFormat} failed: ${err.message.split('\n')[0]}`;
+        return reject(new Error(msg));
+      }
       resolve(outPath);
     });
   });

@@ -1,6 +1,6 @@
 # Folio
 
-Your cozy, dark, moody ebook library. A real desktop app that lives on your Mac, reads EPUBs, manages metadata, and copies books to your Kobo, Kindle, and Xteink X4.
+A magical girl ebook library, built for Mac. Japanese-inspired visuals, real local storage, and direct transfer to your Kobo, Kindle, and Xteink X4.
 
 This is the starter kit. Everything here works out of the box, but it is intentionally a foundation to vibe-code on top of, not a finished product. Claude Code will do the heavy lifting from here.
 
@@ -8,11 +8,13 @@ This is the starter kit. Everything here works out of the box, but it is intenti
 
 When you run this for the first time you will have:
 
-A working desktop app with the dark reading-den aesthetic. A real SQLite database that stores your library and persists forever. EPUB import with automatic metadata extraction (title, author, publisher, year, cover art, ISBN when present). Metadata editing with title, author, series, tags, reading status, star rating. Filter by reading status. Shelf organization by tag. Live search. Grid and list views. Device configuration for Kobo Libra 2, Kindle Paperwhite, and Xteink X4. USB file transfer to any connected device. Auto-detection when you plug a device in, with a green dot in the sidebar.
+A working desktop app with a magical girl, Japanese-inspired aesthetic. A real SQLite database that stores your library and persists forever. EPUB import with automatic metadata extraction (title, author, publisher, year, cover art, ISBN when present). Duplicate detection — Folio checks the file hash before importing and skips exact duplicates; it also flags books with matching title and author. Metadata editing with title, author, series, tags, reading status, star rating. Filter by reading status. Shelf organization by tag. Live search. Grid and list views.
 
-What is not wired up yet, which you will build with Claude Code in weekend two and beyond:
+Device support: Kobo Libra 2, Kindle Paperwhite, and Xteink X4. USB file transfer with a folder picker so you can choose exactly where books land on the device. Auto-detection when you plug a device in, with a green dot in the sidebar. KOReader support — if your Kobo or other device runs KOReader, enable it in the device settings and Folio will open books directly in KOReader. Send to Kindle via email delivery.
 
-Format conversion (EPUB to KEPUB for Kobo, EPUB to MOBI for Kindle). Send-to-Kindle email delivery. Wireless transfer to the Xteink. Cover fetching from Open Library for books that have no embedded cover. Drag-and-drop import. Reading progress sync from the devices.
+What is not wired up yet, which you will build with Claude Code:
+
+Format conversion (EPUB to KEPUB for Kobo). Wireless transfer to the Xteink. Cover fetching from Open Library for books that have no embedded cover. Drag-and-drop import. Reading progress sync from the devices.
 
 ## Part one: installing the things you need
 
@@ -66,7 +68,7 @@ If you want to never touch the terminal again after this, I will show you how to
 
 ## Part three: making it yours with Claude Code
 
-This is the fun part. Open the folio folder in VS Code (File → Open Folder). On the left you will see all the project files. On the right or bottom, open the Claude Code chat panel.
+This is the fun part. Open the folio folder in VS Code (File → Open Folder). You will see all the project files on the left. On the right or bottom, open the Claude Code chat panel.
 
 Now you can just talk to it. Some examples to try first:
 
@@ -80,15 +82,15 @@ Claude Code will read the relevant files, propose changes, and once you approve,
 
 Other features that are natural next builds:
 
-"Add a conversion queue. When I send an EPUB to the Kindle, first convert it to MOBI by shelling out to Calibre's ebook-convert command, then copy the MOBI to the device."
+"Add EPUB to KEPUB conversion when sending books to the Kobo, using Calibre's ebook-convert command."
 
 "Add a 'Currently reading' widget at the top of the library view that shows my in-progress books with a progress bar."
-
-"Add Send-to-Kindle email support using nodemailer. The SMTP credentials should live in a settings panel."
 
 "Add drag-and-drop file import to the main window."
 
 "Watch the Kobo's reading position files when it is mounted and sync the reading progress back into the local database."
+
+"Add wireless transfer support for the Xteink X4."
 
 Each of these is a realistic weekend afternoon of work with Claude Code doing the typing.
 
@@ -104,11 +106,11 @@ You can back this up by copying that folder. You can also use Time Machine, whic
 
 ## Configuring your devices
 
-The first time you plug in your Kobo, it mounts at /Volumes/KOBOeReader. Folio detects this automatically and the green dot lights up in the sidebar. Click the device in the sidebar to set the books folder (usually leave it blank to copy to the root), the preferred format, and so on.
+**Kobo:** The first time you plug in your Kobo, it mounts at /Volumes/KOBOeReader. Folio detects this automatically and the green dot lights up in the sidebar. When you send a book, a folder picker lets you choose exactly where it lands. If your Kobo runs KOReader, check the KOReader toggle in the device settings — Folio will open books directly in KOReader.
 
-For the Xteink X4, plug it in via USB and check in Finder what the volume is called (it varies by firmware version). Use that path in the device config. Wireless support will come later.
+**Kindle:** Configure your Send-to-Kindle email in the device settings. You can find your address in Amazon's "Manage your content and devices" page under Preferences → Personal Document Settings. When sending, you can choose between USB copy or email delivery.
 
-For the Kindle, you will want to configure the send-to-Kindle email. You can find yours in the Amazon "Manage your content and devices" page under Preferences → Personal Document Settings.
+**Xteink X4:** Plug it in via USB and check in Finder what the volume is called (it varies by firmware version). Use that path in the device config. Wireless support will come later.
 
 ## Packaging it into a real app
 
@@ -118,7 +120,7 @@ Once you have Folio the way you want it, open Terminal in the folio folder and r
 npm run build:mac
 ```
 
-This produces a Folio.dmg file in a folder called `dist`. You can install that like any Mac app. Drag the icon to Applications and you never have to open the Terminal again. You can delete the project folder if you want, or keep it for future tinkering.
+This produces a .dmg file in a folder called `dist`. You can install that like any Mac app. Drag the icon to Applications and you never have to open the Terminal again. You can delete the project folder if you want, or keep it for future tinkering.
 
 ## If something breaks
 

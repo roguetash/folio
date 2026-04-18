@@ -16,7 +16,8 @@ const state = {
   selected: null,
   editData: {},
   multiSel: new Set(),
-  sendTarget: null
+  sendTarget: null,
+  sendingTo: null
 };
 
 function colorForBook(b) {
@@ -94,9 +95,10 @@ function renderSidebar() {
 
   $('device-list').innerHTML = state.devices.map(d => {
     const cls = d.connected ? ' connected' : '';
+    const krTag = d.uses_koreader ? ' · KOReader' : '';
     const status = d.brand === 'xteink'
       ? (d.connected ? 'Reachable over WiFi' : 'Not reachable — enable WiFi Transfer')
-      : (d.connected ? 'Connected' : 'Disconnected');
+      : (d.connected ? `Connected${krTag}` : 'Disconnected');
     return `<div class="device-item${cls}" data-device="${d.id}">
       <div class="device-ind"></div>
       <div class="device-info">
@@ -433,7 +435,9 @@ function openSendModal() {
 function showTransferPreview(deviceId) {
   const device = state.devices.find(d => d.id === deviceId);
   const selBooks = Array.from(state.multiSel).map(id => state.books.find(b => b.id === id)).filter(Boolean);
+  let currentSendFolder = device.books_folder || '/';
   const modal = $('modal');
+
   modal.innerHTML = `
     <div class="modal-head">
       <div>
@@ -461,18 +465,22 @@ function showTransferPreview(deviceId) {
           </div>`;
         }).join('')}
       </div>
+      <div class="modal-section" id="folder-section">
+        <div class="modal-section-label">Destination folder${device.uses_koreader ? ' · KOReader organizes books by folder' : ''}</div>
+        <div id="folder-picker"><div class="folder-loading">Loading...</div></div>
+      </div>
       ${device.brand === 'kindle' && device.kindle_email
-      ? `<div class="transfer-options">
-          <div class="transfer-opt" id="opt-usb">
-            <div class="transfer-opt-title">Copy via USB</div>
-            <div class="transfer-opt-meta">Device must be connected · EPUBs converted to MOBI</div>
-          </div>
-          <div class="transfer-opt" id="opt-email">
-            <div class="transfer-opt-title">Send via email</div>
-            <div class="transfer-opt-meta">To ${escapeHtml(device.kindle_email)}</div>
-          </div>
-        </div>`
-      : ''}
+        ? `<div class="transfer-options">
+            <div class="transfer-opt" id="opt-usb">
+              <div class="transfer-opt-title">Copy via USB</div>
+              <div class="transfer-opt-meta">Device must be connected · EPUBs converted to MOBI</div>
+            </div>
+            <div class="transfer-opt" id="opt-email">
+              <div class="transfer-opt-title">Send via email</div>
+              <div class="transfer-opt-meta">To ${escapeHtml(device.kindle_email)}</div>
+            </div>
+          </div>`
+        : ''}
     </div>
     <div class="modal-foot">
       <button class="btn-ghost" id="back-btn">Back</button>
@@ -480,8 +488,42 @@ function showTransferPreview(deviceId) {
         ? `<button class="btn-primary" id="start-btn">Copy via USB</button>`
         : `<button class="btn-primary" id="start-btn">Start transfer</button>`}
     </div>`;
+
   $('modal-close').onclick = closeModal;
   $('back-btn').onclick = openSendModal;
+
+  async function renderFolderPicker(browsePath) {
+    currentSendFolder = browsePath || '/';
+    const el = $('folder-picker');
+    if (!el) return;
+    el.innerHTML = `<div class="folder-loading">Loading...</div>`;
+    const r = await window.folio.devices.listFolders(deviceId, browsePath);
+    const folders = (r.ok ? r.folders : []);
+    const parts = (browsePath || '/').replace(/^\/+/, '').split('/').filter(Boolean);
+    const crumbs = [{ label: '/', path: '/' }];
+    let acc = '';
+    for (const p of parts) { acc += '/' + p; crumbs.push({ label: p, path: acc }); }
+    el.innerHTML = `
+      <div class="folder-crumb">
+        ${crumbs.map((c, i) => `<span class="folder-crumb-seg${i === crumbs.length - 1 ? ' active' : ''}" data-ci="${i}">${escapeHtml(c.label)}</span>`).join('<span class="folder-crumb-sep">›</span>')}
+      </div>
+      <div class="folder-list">
+        ${folders.length
+          ? folders.map((f, i) => `<div class="folder-item" data-fi="${i}">${escapeHtml(f)}</div>`).join('')
+          : `<div class="folder-empty">${r.ok ? 'No subfolders — books go here' : r.error || 'Could not load folders'}</div>`}
+      </div>`;
+    el.querySelectorAll('.folder-item').forEach(item => {
+      item.onclick = () => {
+        const f = folders[parseInt(item.dataset.fi)];
+        renderFolderPicker(browsePath === '/' ? `/${f}` : `${browsePath}/${f}`);
+      };
+    });
+    el.querySelectorAll('.folder-crumb-seg:not(.active)').forEach(seg => {
+      seg.onclick = () => renderFolderPicker(crumbs[parseInt(seg.dataset.ci)].path);
+    });
+  }
+
+  renderFolderPicker(currentSendFolder);
 
   if (device.brand === 'kindle' && device.kindle_email) {
     const optUsb = $('opt-usb');
@@ -493,41 +535,97 @@ function showTransferPreview(deviceId) {
       optUsb.classList.toggle('active', !email);
       optEmail.classList.toggle('active', email);
       startBtn.textContent = email ? 'Send via email' : 'Copy via USB';
+      const folderSection = $('folder-section');
+      if (folderSection) folderSection.style.display = email ? 'none' : '';
     };
     selectOpt(false);
     optUsb.onclick = () => selectOpt(false);
     optEmail.onclick = () => selectOpt(true);
-    startBtn.onclick = () => useEmail ? doEmailSend(deviceId) : doUsbSend(deviceId);
+    startBtn.onclick = () => useEmail ? doEmailSend(deviceId) : doUsbSend(deviceId, currentSendFolder);
   } else {
-    $('start-btn').onclick = () => doUsbSend(deviceId);
+    $('start-btn').onclick = () => doUsbSend(deviceId, currentSendFolder);
   }
 }
 
-async function doUsbSend(deviceId) {
-  const btn = $('start-btn');
-  btn.disabled = true; btn.textContent = 'Sending...';
-  const result = await window.folio.devices.send(Array.from(state.multiSel), deviceId);
-  handleSendResult(result, btn, 'Copy via USB');
+function startTransferUI(count, deviceName) {
+  const modal = $('modal');
+  if (!modal) return;
+  const closeBtn = modal.querySelector('#modal-close');
+  if (closeBtn) closeBtn.style.pointerEvents = 'none';
+  const body = modal.querySelector('.modal-body');
+  const foot = modal.querySelector('.modal-foot');
+  const needsConvert = Array.from(state.multiSel).some(id => {
+    const b = state.books.find(x => x.id === id);
+    const d = state.devices.find(x => x.id === state.sendTarget);
+    return d && d.brand === 'kindle' && b && !new Set(['MOBI','AZW3']).has(b.file_format);
+  });
+  if (body) body.innerHTML = `
+    <div class="transfer-in-progress">
+      <div class="tip-bar-wrap"><div class="tip-bar"></div></div>
+      <div class="tip-label">Sending ${count} book${count !== 1 ? 's' : ''} to ${escapeHtml(deviceName)}</div>
+      <div class="tip-sub">${needsConvert ? 'Converting format — this may take a minute...' : 'Copying files to device...'}</div>
+    </div>`;
+  if (foot) foot.innerHTML = '';
+}
+
+async function doUsbSend(deviceId, folderOverride) {
+  const device = state.devices.find(d => d.id === deviceId);
+  state.sendTarget = deviceId;
+  startTransferUI(state.multiSel.size, device.name);
+  const result = await window.folio.devices.send(Array.from(state.multiSel), deviceId, folderOverride);
+  handleSendResult(result, device.name);
 }
 
 async function doEmailSend(deviceId) {
-  const btn = $('start-btn');
-  btn.disabled = true; btn.textContent = 'Sending...';
+  const device = state.devices.find(d => d.id === deviceId);
+  state.sendTarget = deviceId;
+  startTransferUI(state.multiSel.size, device.name);
   const result = await window.folio.kindle.sendEmail(Array.from(state.multiSel), deviceId);
-  handleSendResult(result, btn, 'Send via email');
+  handleSendResult(result, device.name);
 }
 
-function handleSendResult(result, btn, originalLabel) {
+function handleSendResult(result, deviceName) {
+  closeModal();
+  state.multiSel.clear();
+  state.sendTarget = null;
+
   if (!result.ok) {
-    $('modal').querySelector('.modal-body').insertAdjacentHTML('afterbegin', `<div class="err-banner">${result.error}</div>`);
-    btn.disabled = false; btn.textContent = originalLabel;
+    showToast('error', result.error || 'Transfer failed');
+    loadAll();
     return;
   }
-  btn.textContent = 'Done';
-  btn.style.background = 'rgba(15,110,86,.3)';
-  btn.style.color = '#5dcaa5';
-  btn.style.borderColor = 'rgba(15,110,86,.4)';
-  setTimeout(() => { closeModal(); state.multiSel.clear(); loadAll(); }, 1200);
+
+  const results = result.results || [];
+  const succeeded = results.filter(r => r.ok).length;
+  const failed = results.filter(r => !r.ok);
+
+  if (succeeded > 0) {
+    showToast('success', `${succeeded} book${succeeded !== 1 ? 's' : ''} sent to ${escapeHtml(deviceName)}`);
+  }
+  failed.forEach(f => {
+    const book = state.books.find(b => b.id === f.id);
+    showToast('error', `${escapeHtml(book ? book.title : 'Book')}: ${escapeHtml(f.error || 'Unknown error')}`);
+  });
+  if (succeeded === 0 && failed.length === 0) {
+    showToast('info', 'Nothing was transferred.');
+  }
+
+  loadAll();
+}
+
+function showToast(type, message) {
+  const stack = $('toast-stack');
+  if (!stack) return;
+  const duration = type === 'error' ? 8000 : 4500;
+  const icons = { success: '✓', error: '✕', info: '↗' };
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `<span class="toast-icon">${icons[type] || '·'}</span><span class="toast-msg">${escapeHtml(message)}</span><button class="toast-close">✕</button>`;
+  stack.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  const dismiss = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 320); };
+  t.querySelector('.toast-close').onclick = dismiss;
+  setTimeout(dismiss, duration);
 }
 
 function openDeviceConfig(id) {
@@ -581,8 +679,20 @@ function openDeviceConfig(id) {
         <div class="modal-section-label">Send-to-Kindle email</div>
         <input class="field-inp" id="d-email" value="${escapeHtml(d.kindle_email || '')}" placeholder="name_xxxxx@kindle.com">
       </div>` : ''}
+      ${!isXteink ? `
+      <div class="modal-section" style="display:flex;align-items:center;gap:10px">
+        <input type="checkbox" id="d-koreader" ${d.uses_koreader ? 'checked' : ''}>
+        <label for="d-koreader" style="font-size:12px;color:var(--text2);cursor:pointer">This device runs KOReader</label>
+      </div>
+      ${d.uses_koreader && d.connected ? `
+      <div style="padding:10px 12px;background:rgba(93,202,165,.06);border:1px solid rgba(93,202,165,.2);border-radius:6px;font-size:12px;color:var(--text2);line-height:1.5">
+        KOReader stores reading progress in <code>.sdr</code> folders next to each book.
+        After reading on device, sync to update Folio's progress bars.
+      </div>
+      <button class="secondary-btn" id="sync-koreader-btn" style="margin-top:4px">Sync reading progress</button>` : ''}` : ''}
     </div>
     <div class="modal-foot">
+      <button class="danger-btn" id="remove-device" style="width:auto;margin-top:0;margin-right:auto">Remove device</button>
       <button class="btn-ghost" id="modal-cancel">Cancel</button>
       <button class="btn-primary" id="save-device">Save</button>
     </div>`;
@@ -596,12 +706,35 @@ function openDeviceConfig(id) {
       mount_path: $('d-mount').value,
       books_folder: $('d-folder').value,
       preferred_format: $('d-format').value,
-      kindle_email: d.brand === 'kindle' ? $('d-email').value : d.kindle_email
+      kindle_email: d.brand === 'kindle' ? $('d-email').value : d.kindle_email,
+      uses_koreader: $('d-koreader') ? $('d-koreader').checked : d.uses_koreader
     };
     await window.folio.devices.update(updated);
     closeModal();
     await loadAll();
   };
+  $('remove-device').onclick = async () => {
+    if (!confirm(`Remove "${d.name}" from Folio? This won't affect files on the device.`)) return;
+    await window.folio.devices.delete(d.id);
+    closeModal();
+    await loadAll();
+  };
+  const syncBtn = $('sync-koreader-btn');
+  if (syncBtn) {
+    syncBtn.onclick = async () => {
+      syncBtn.disabled = true;
+      syncBtn.textContent = 'Syncing...';
+      const r = await window.folio.devices.syncKoreader(d.id);
+      if (r.ok) {
+        syncBtn.textContent = `Synced ${r.updated} book${r.updated !== 1 ? 's' : ''}`;
+        setTimeout(() => { syncBtn.textContent = 'Sync reading progress'; syncBtn.disabled = false; }, 2000);
+        await loadAll();
+      } else {
+        syncBtn.textContent = r.error;
+        setTimeout(() => { syncBtn.textContent = 'Sync reading progress'; syncBtn.disabled = false; }, 2500);
+      }
+    };
+  }
 }
 
 async function openSettingsModal() {
@@ -637,9 +770,13 @@ async function openSettingsModal() {
         <div class="modal-section-label">Password / app password</div>
         <input class="field-inp" id="s-pass" type="password" value="${escapeHtml(smtp.password || '')}" placeholder="••••••••••••••••">
       </div>
-      <div style="padding:10px 12px;background:rgba(201,150,42,.08);border:1px solid rgba(201,150,42,.25);border-radius:6px;font-size:12px;color:var(--text2);line-height:1.5">
+      <div style="padding:10px 12px;background:rgba(255,105,180,.06);border:1px solid rgba(255,105,180,.15);border-radius:8px;font-size:12px;color:var(--text2);line-height:1.5">
         The sender address must be on your Kindle's approved email list at amazon.com/myk.
         For Gmail, use an App Password — not your account password.
+      </div>
+      <div class="modal-section" style="border-top:1px solid var(--ink3);padding-top:18px;margin-top:4px">
+        <div class="modal-section-label">Library</div>
+        <button class="secondary-btn" id="find-dupes-btn" style="width:100%;text-align:left;padding:9px 12px;border-radius:10px">Find &amp; remove duplicates</button>
       </div>
     </div>
     <div class="modal-foot">
@@ -649,6 +786,7 @@ async function openSettingsModal() {
   $('overlay').classList.add('show');
   $('modal-close').onclick = closeModal;
   $('modal-cancel').onclick = closeModal;
+  $('find-dupes-btn').onclick = () => { closeModal(); openDuplicatesModal(); };
   $('save-settings').onclick = async () => {
     const data = {
       smtp: {
@@ -668,6 +806,109 @@ function closeModal() {
   $('overlay').classList.remove('show');
 }
 
+async function openDuplicatesModal() {
+  const modal = $('modal');
+  modal.innerHTML = `
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Find duplicates</div>
+        <div class="modal-sub">Scanning your library...</div>
+      </div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body"><div class="folder-loading">Scanning...</div></div>`;
+  $('overlay').classList.add('show');
+  $('modal-close').onclick = closeModal;
+
+  const groups = await window.folio.books.findDuplicates();
+  renderDuplicatesModal(groups);
+}
+
+function renderDuplicatesModal(groups) {
+  const modal = $('modal');
+  if (!groups.length) {
+    modal.innerHTML = `
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">Find duplicates</div>
+          <div class="modal-sub">No duplicates found</div>
+        </div>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="text-align:center;padding:32px 20px;color:var(--mint);font-size:14px;font-weight:600">
+          ✓ Your library is clean
+        </div>
+      </div>
+      <div class="modal-foot"><button class="btn-ghost" id="modal-cancel">Close</button></div>`;
+    $('modal-close').onclick = closeModal;
+    $('modal-cancel').onclick = closeModal;
+    return;
+  }
+
+  const typeLabel = { exact: 'Exact file copy', title_author: 'Same title & author' };
+  modal.innerHTML = `
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Find duplicates</div>
+        <div class="modal-sub">${groups.length} group${groups.length !== 1 ? 's' : ''} found</div>
+      </div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      ${groups.map((g, gi) => `
+        <div class="dupe-group" data-gi="${gi}">
+          <div class="dupe-group-label">${typeLabel[g.type] || g.type}</div>
+          ${g.books.map(b => `
+            <div class="dupe-item" data-book-id="${b.id}">
+              <div class="dupe-cover" style="${bookSpineStyle(b)}"></div>
+              <div class="dupe-info">
+                <div class="dupe-title-sm">${escapeHtml(b.title)}</div>
+                <div class="dupe-meta-sm">${b.file_format || ''} · ${b.file_size ? Math.round(b.file_size / 1024) + ' KB' : '?'} · Added ${(b.date_added || '').slice(0, 10)}</div>
+              </div>
+              <button class="dupe-remove-btn" data-book-id="${b.id}">Remove</button>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="modal-cancel">Done</button>
+    </div>`;
+
+  $('modal-close').onclick = closeModal;
+  $('modal-cancel').onclick = closeModal;
+
+  modal.querySelectorAll('.dupe-remove-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const id = parseInt(btn.dataset.bookId);
+      btn.disabled = true; btn.textContent = 'Removing...';
+      await window.folio.books.delete(id);
+      await loadAll();
+
+      // Remove this item from the modal; if group has 1 left, remove group too
+      const item = btn.closest('.dupe-item');
+      const group = btn.closest('.dupe-group');
+      item.remove();
+      if (group.querySelectorAll('.dupe-item').length < 2) group.remove();
+
+      // Update subtitle count
+      const remaining = modal.querySelectorAll('.dupe-group').length;
+      const sub = modal.querySelector('.modal-sub');
+      if (sub) sub.textContent = remaining ? `${remaining} group${remaining !== 1 ? 's' : ''} found` : 'All resolved';
+      if (!remaining) {
+        modal.querySelector('.modal-body').innerHTML = `
+          <div style="text-align:center;padding:32px 20px;color:var(--mint);font-size:14px;font-weight:600">✓ All duplicates resolved</div>`;
+      }
+    };
+  });
+}
+
+function importResultToast(result) {
+  const parts = [];
+  if (result.imported > 0) parts.push(`${result.imported} book${result.imported !== 1 ? 's' : ''} imported`);
+  if (result.skipped && result.skipped.length > 0) parts.push(`${result.skipped.length} skipped — already in library`);
+  if (parts.length) showToast(result.imported > 0 ? 'success' : 'info', parts.join(' · '));
+}
+
 $('import-btn').onclick = async () => {
   const btn = $('import-btn');
   const original = btn.textContent;
@@ -677,6 +918,7 @@ $('import-btn').onclick = async () => {
   btn.textContent = original;
   btn.disabled = false;
   if (result.imported > 0) await loadAll();
+  importResultToast(result);
 };
 
 $('settings-btn').onclick = openSettingsModal;
@@ -712,6 +954,7 @@ document.addEventListener('drop', async e => {
   if (!paths.length) return;
   const result = await window.folio.books.importPaths(paths);
   if (result.imported > 0) await loadAll();
+  importResultToast(result);
 });
 
 setInterval(async () => {
