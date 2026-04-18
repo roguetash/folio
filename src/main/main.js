@@ -518,7 +518,11 @@ ipcMain.handle('devices:list-books', (e, deviceId) => {
 ipcMain.handle('devices:remove-book', (e, { deviceId, devicePath }) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, error: 'Device not found' };
-  if (!devicePath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+
+  // Ensure mount path ends with separator to avoid prefix-matching a different volume
+  const mountPrefix = device.mount_path.endsWith(path.sep) ? device.mount_path : device.mount_path + path.sep;
+  if (!devicePath.startsWith(mountPrefix)) return { ok: false, error: 'Path outside device mount' };
+
   try {
     fs.unlinkSync(devicePath);
     const sdrDir = devicePath + '.sdr';
@@ -526,7 +530,7 @@ ipcMain.handle('devices:remove-book', (e, { deviceId, devicePath }) => {
     const filename = path.basename(devicePath);
     const localBook = db.prepare("SELECT id FROM books WHERE file_path LIKE ?").get(`%${filename}`);
     if (localBook) db.prepare('DELETE FROM book_devices WHERE book_id=? AND device_id=?').run(localBook.id, deviceId);
-    return { ok: true };
+    return { ok: true, needsEject: device.brand === 'kindle' };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -574,7 +578,8 @@ ipcMain.handle('devices:create-folder', (e, { deviceId, parentPath, name }) => {
 ipcMain.handle('devices:rename-folder', (e, { deviceId, folderPath, newName }) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, error: 'Device not found' };
-  if (!folderPath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+  const mountPrefix = device.mount_path.endsWith(path.sep) ? device.mount_path : device.mount_path + path.sep;
+  if (!folderPath.startsWith(mountPrefix) && folderPath !== device.mount_path) return { ok: false, error: 'Path outside device mount' };
   const newPath = path.join(path.dirname(folderPath), newName.trim());
   try {
     fs.renameSync(folderPath, newPath);
@@ -587,7 +592,8 @@ ipcMain.handle('devices:rename-folder', (e, { deviceId, folderPath, newName }) =
 ipcMain.handle('devices:delete-folder', (e, { deviceId, folderPath }) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, error: 'Device not found' };
-  if (!folderPath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+  const mountPrefix = device.mount_path.endsWith(path.sep) ? device.mount_path : device.mount_path + path.sep;
+  if (!folderPath.startsWith(mountPrefix)) return { ok: false, error: 'Path outside device mount' };
   if (folderPath === device.mount_path) return { ok: false, error: 'Cannot delete root mount' };
   try {
     fs.rmSync(folderPath, { recursive: true, force: true });
@@ -600,7 +606,8 @@ ipcMain.handle('devices:delete-folder', (e, { deviceId, folderPath }) => {
 ipcMain.handle('devices:move-books', (e, { deviceId, devicePaths, destFolder }) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, error: 'Device not found' };
-  if (!destFolder.startsWith(device.mount_path)) return { ok: false, error: 'Destination outside device mount' };
+  const mountPrefix = device.mount_path.endsWith(path.sep) ? device.mount_path : device.mount_path + path.sep;
+  if (!destFolder.startsWith(mountPrefix) && destFolder !== device.mount_path) return { ok: false, error: 'Destination outside device mount' };
   try { fs.mkdirSync(destFolder, { recursive: true }); } catch {}
   const results = [];
   for (const srcPath of devicePaths) {

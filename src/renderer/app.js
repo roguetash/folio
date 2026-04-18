@@ -811,7 +811,11 @@ async function openDeviceLibraryModal(deviceId) {
             if (r.ok) removed++;
           }
           selected.clear();
-          showToast('success', `Removed ${removed} book${removed !== 1 ? 's' : ''} from device`);
+          const isKindle = device.brand === 'kindle';
+          const removeMsg = isKindle
+            ? `Removed ${removed} book${removed !== 1 ? 's' : ''} — eject and reconnect Kindle to refresh`
+            : `Removed ${removed} book${removed !== 1 ? 's' : ''} from device`;
+          showToast('success', removeMsg);
           if (state.activeDevice === deviceId) {
             const scan = await window.folio.devices.scanBooks(deviceId);
             if (scan.ok) state.deviceBooks = new Set(scan.bookIds);
@@ -893,7 +897,11 @@ async function openDeviceLibraryModal(deviceId) {
           btn.disabled = true;
           const r = await window.folio.devices.removeBook(deviceId, btn.dataset.path);
           if (r.ok) {
-            showToast('success', 'Removed from device');
+            if (r.needsEject) {
+              showToast('success', 'Removed — safely eject and reconnect Kindle to refresh its library');
+            } else {
+              showToast('success', 'Removed from device');
+            }
             if (state.activeDevice === deviceId) {
               const scan = await window.folio.devices.scanBooks(deviceId);
               if (scan.ok) { state.deviceBooks = new Set(scan.bookIds); renderSidebar(); renderBooks(); }
