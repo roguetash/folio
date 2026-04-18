@@ -4,7 +4,7 @@
   "description": "A magical ebook library manager",
   "main": "src/main/main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "ELECTRON_RUN_AS_NODE= electron .",
     "build:mac": "electron-builder --mac"
   },
   "author": "Tash",

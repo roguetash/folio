@@ -17,7 +17,9 @@ const state = {
   editData: {},
   multiSel: new Set(),
   sendTarget: null,
-  sendingTo: null
+  sendingTo: null,
+  activeDevice: null,
+  deviceBooks: new Set()
 };
 
 function colorForBook(b) {
@@ -94,22 +96,50 @@ function renderSidebar() {
   });
 
   $('device-list').innerHTML = state.devices.map(d => {
-    const cls = d.connected ? ' connected' : '';
+    const isActive = state.activeDevice === d.id;
+    const cls = (d.connected ? ' connected' : '') + (isActive ? ' active' : '');
     const krTag = d.uses_koreader ? ' · KOReader' : '';
     const status = d.brand === 'xteink'
       ? (d.connected ? 'Reachable over WiFi' : 'Not reachable — enable WiFi Transfer')
       : (d.connected ? `Connected${krTag}` : 'Disconnected');
+    const countBadge = isActive && state.deviceBooks.size > 0
+      ? `<span class="device-book-count">${state.deviceBooks.size}</span>` : '';
     return `<div class="device-item${cls}" data-device="${d.id}">
       <div class="device-ind"></div>
       <div class="device-info">
-        <div class="device-name">${d.name}</div>
-        <div class="device-status">${status}</div>
+        <div class="device-name">${d.name}${countBadge}</div>
+        <div class="device-status">${isActive ? `Showing ${state.deviceBooks.size} book${state.deviceBooks.size !== 1 ? 's' : ''} on device` : status}</div>
       </div>
+      <button class="device-cfg-btn" data-cfg="${d.id}" title="Configure">⚙</button>
     </div>`;
-  }).join('');
+  }).join('') + `<button class="add-device-btn" id="add-device-btn">+ Add device</button>`;
+
   $('device-list').querySelectorAll('.device-item').forEach(el => {
-    el.onclick = () => openDeviceConfig(parseInt(el.dataset.device));
+    el.onclick = e => {
+      if (e.target.dataset.cfg) return;
+      toggleActiveDevice(parseInt(el.dataset.device));
+    };
   });
+  $('device-list').querySelectorAll('.device-cfg-btn').forEach(btn => {
+    btn.onclick = e => { e.stopPropagation(); openDeviceConfig(parseInt(btn.dataset.cfg)); };
+  });
+  const addBtn = $('add-device-btn');
+  if (addBtn) addBtn.onclick = openAddDeviceModal;
+}
+
+async function toggleActiveDevice(id) {
+  if (state.activeDevice === id) {
+    state.activeDevice = null;
+    state.deviceBooks = new Set();
+    renderSidebar(); renderBooks();
+    return;
+  }
+  state.activeDevice = id;
+  state.deviceBooks = new Set();
+  renderSidebar();
+  const r = await window.folio.devices.scanBooks(id);
+  if (r.ok) state.deviceBooks = new Set(r.bookIds);
+  renderSidebar(); renderBooks();
 }
 
 function setFilter(f) {
@@ -180,11 +210,17 @@ function renderBooks() {
     updateStats([]);
     return;
   }
+  const activeDeviceName = state.activeDevice
+    ? (state.devices.find(d => d.id === state.activeDevice) || {}).name || ''
+    : '';
   if (state.view === 'grid') {
-    el.innerHTML = `<div class="grid">${list.map(b => `
-      <div class="book-card${state.selected === b.id ? ' selected' : ''}${state.multiSel.has(b.id) ? ' multi-sel' : ''}" data-id="${b.id}">
+    el.innerHTML = `<div class="grid">${list.map(b => {
+      const onDevice = state.activeDevice && state.deviceBooks.has(b.id);
+      return `
+      <div class="book-card${state.selected === b.id ? ' selected' : ''}${state.multiSel.has(b.id) ? ' multi-sel' : ''}${onDevice ? ' on-device' : ''}" data-id="${b.id}">
         <div class="multi-check" data-check="${b.id}">✓</div>
         <span class="format-badge">${b.file_format || ''}</span>
+        ${onDevice ? `<span class="device-badge" title="On ${escapeHtml(activeDeviceName)}">📖</span>` : ''}
         <div class="book-spine" style="${bookSpineStyle(b)}">
           <div style="position:absolute;inset:0;background:linear-gradient(160deg,rgba(0,0,0,.1) 0%,transparent 50%,rgba(0,0,0,.5) 100%)"></div>
           ${!b.cover_path ? `<div class="book-spine-title">${escapeHtml(b.title)}</div>` : ''}
@@ -194,10 +230,13 @@ function renderBooks() {
           <div class="book-author">${escapeHtml(b.author || 'Unknown author')}</div>
           <div class="book-meta">${statusBadge(b.status)}<span class="book-rating">${stars(b.rating)}</span></div>
         </div>
-      </div>`).join('')}</div>`;
+      </div>`;
+    }).join('')}</div>`;
   } else {
-    el.innerHTML = `<div class="list-view">${list.map(b => `
-      <div class="list-row${state.selected === b.id ? ' selected' : ''}${state.multiSel.has(b.id) ? ' multi-sel' : ''}" data-id="${b.id}">
+    el.innerHTML = `<div class="list-view">${list.map(b => {
+      const onDevice = state.activeDevice && state.deviceBooks.has(b.id);
+      return `
+      <div class="list-row${state.selected === b.id ? ' selected' : ''}${state.multiSel.has(b.id) ? ' multi-sel' : ''}${onDevice ? ' on-device' : ''}" data-id="${b.id}">
         <div class="list-check" data-check="${b.id}">✓</div>
         <div class="list-title">${escapeHtml(b.title)}</div>
         <div class="list-author">${escapeHtml(b.author || '—')}</div>
@@ -205,7 +244,9 @@ function renderBooks() {
         <div class="list-format">${b.file_format || ''}</div>
         <div class="list-rating">${stars(b.rating)}</div>
         ${statusBadge(b.status)}
-      </div>`).join('')}</div>`;
+        ${onDevice ? `<span class="device-badge-list" title="On ${escapeHtml(activeDeviceName)}">on device</span>` : ''}
+      </div>`;
+    }).join('')}</div>`;
   }
   el.querySelectorAll('[data-id]').forEach(row => {
     row.onclick = e => {
@@ -628,6 +669,93 @@ function showToast(type, message) {
   setTimeout(dismiss, duration);
 }
 
+function openAddDeviceModal() {
+  const modal = $('modal');
+  modal.innerHTML = `
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Add device</div>
+        <div class="modal-sub">Connect a new reader to your library</div>
+      </div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-label">Device type</div>
+        <div class="device-type-row">
+          <button class="device-type-btn active" data-brand="kobo">Kobo</button>
+          <button class="device-type-btn" data-brand="kindle">Kindle</button>
+          <button class="device-type-btn" data-brand="xteink">Xteink</button>
+          <button class="device-type-btn" data-brand="other">Other</button>
+        </div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Device name</div>
+        <input class="field-inp" id="nd-name" value="My Kobo" placeholder="e.g. Kobo Libra 2">
+      </div>
+      <div class="modal-section" id="nd-mount-section">
+        <div class="modal-section-label" id="nd-mount-label">Mount path (usually /Volumes/KOBOeReader)</div>
+        <input class="field-inp" id="nd-mount" value="/Volumes/KOBOeReader" placeholder="/Volumes/YourDevice">
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Books folder on device (leave blank for root)</div>
+        <input class="field-inp" id="nd-folder" value="" placeholder="documents, books, etc.">
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Preferred format</div>
+        <input class="field-inp" id="nd-format" value="KEPUB" placeholder="EPUB, KEPUB, MOBI…">
+      </div>
+      <div class="modal-section" id="nd-email-section" style="display:none">
+        <div class="modal-section-label">Send-to-Kindle email</div>
+        <input class="field-inp" id="nd-email" placeholder="name_xxxxx@kindle.com">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="modal-cancel">Cancel</button>
+      <button class="btn-primary" id="add-device-save">Add device</button>
+    </div>`;
+  $('overlay').classList.add('show');
+  $('modal-close').onclick = closeModal;
+  $('modal-cancel').onclick = closeModal;
+
+  const BRAND_DEFAULTS = {
+    kobo:   { name: 'My Kobo',   mount: '/Volumes/KOBOeReader', format: 'KEPUB', mountLabel: 'Mount path (usually /Volumes/KOBOeReader)' },
+    kindle: { name: 'My Kindle', mount: '/Volumes/Kindle',      format: 'MOBI',  mountLabel: 'Mount path (usually /Volumes/Kindle)' },
+    xteink: { name: 'Xteink X4', mount: '',                     format: 'EPUB',  mountLabel: 'Device address (IP or hostname)' },
+    other:  { name: 'My Reader', mount: '/Volumes/EReader',     format: 'EPUB',  mountLabel: 'Mount path' }
+  };
+
+  let selectedBrand = 'kobo';
+  modal.querySelectorAll('.device-type-btn').forEach(btn => {
+    btn.onclick = () => {
+      modal.querySelectorAll('.device-type-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedBrand = btn.dataset.brand;
+      const def = BRAND_DEFAULTS[selectedBrand];
+      $('nd-name').value = def.name;
+      $('nd-mount').value = def.mount;
+      $('nd-format').value = def.format;
+      $('nd-mount-label').textContent = def.mountLabel;
+      $('nd-email-section').style.display = selectedBrand === 'kindle' ? '' : 'none';
+    };
+  });
+
+  $('add-device-save').onclick = async () => {
+    const name = $('nd-name').value.trim();
+    if (!name) { $('nd-name').focus(); return; }
+    await window.folio.devices.add({
+      name,
+      brand: selectedBrand,
+      mount_path: $('nd-mount').value.trim(),
+      books_folder: $('nd-folder').value.trim(),
+      preferred_format: $('nd-format').value.trim() || 'EPUB',
+      kindle_email: selectedBrand === 'kindle' ? $('nd-email').value.trim() : ''
+    });
+    closeModal();
+    await loadAll();
+  };
+}
+
 function openDeviceConfig(id) {
   const d = state.devices.find(x => x.id === id);
   const isXteink = d.brand === 'xteink';
@@ -716,6 +844,7 @@ function openDeviceConfig(id) {
   $('remove-device').onclick = async () => {
     if (!confirm(`Remove "${d.name}" from Folio? This won't affect files on the device.`)) return;
     await window.folio.devices.delete(d.id);
+    if (state.activeDevice === d.id) { state.activeDevice = null; state.deviceBooks = new Set(); }
     closeModal();
     await loadAll();
   };

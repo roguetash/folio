@@ -10,9 +10,6 @@ const nodemailer = require('nodemailer');
 const Database = require('better-sqlite3');
 const EPub = require('epub2').EPub;
 
-// Keep userData pointing to 'folio' so data survives a productName change
-app.setPath('userData', path.join(app.getPath('appData'), 'folio'));
-
 let db;
 let mainWindow;
 
@@ -462,6 +459,44 @@ ipcMain.handle('devices:delete', (e, id) => {
   db.prepare('DELETE FROM book_devices WHERE device_id=?').run(id);
   db.prepare('DELETE FROM devices WHERE id=?').run(id);
   return { ok: true };
+});
+
+ipcMain.handle('devices:add', (e, device) => {
+  const result = db.prepare(`
+    INSERT INTO devices (name, brand, mount_path, books_folder, preferred_format, kindle_email, uses_koreader)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+  `).run(device.name, device.brand, device.mount_path || '', device.books_folder || '', device.preferred_format || 'EPUB', device.kindle_email || '');
+  return { ok: true, id: result.lastInsertRowid };
+});
+
+ipcMain.handle('devices:scan-books', (e, deviceId) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, bookIds: [] };
+
+  const sent = db.prepare('SELECT book_id FROM book_devices WHERE device_id=?').all(deviceId);
+  const bookIds = new Set(sent.map(r => r.book_id));
+
+  if (device.brand !== 'xteink' && device.mount_path && fs.existsSync(device.mount_path)) {
+    const relFolder = (device.books_folder || '').replace(/^\/+/, '');
+    const scanRoot = relFolder ? path.join(device.mount_path, relFolder) : device.mount_path;
+    const BOOK_EXTS = new Set(['epub', 'mobi', 'azw3', 'kepub', 'pdf']);
+    const scanDir = (dirPath, depth) => {
+      if (depth > 3) return;
+      let entries;
+      try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        if (entry.isDirectory()) { scanDir(path.join(dirPath, entry.name), depth + 1); continue; }
+        const ext = path.extname(entry.name).slice(1).toLowerCase();
+        if (!BOOK_EXTS.has(ext)) continue;
+        const match = db.prepare("SELECT id FROM books WHERE file_path LIKE ?").get(`%${entry.name}`);
+        if (match) bookIds.add(match.id);
+      }
+    };
+    scanDir(scanRoot, 0);
+  }
+
+  return { ok: true, bookIds: [...bookIds] };
 });
 
 function listXteinkFolders(host, folderPath) {
