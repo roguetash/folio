@@ -707,9 +707,12 @@ async function openDeviceLibraryModal(deviceId) {
     $('dl-sub').textContent = `${books.length} book${books.length !== 1 ? 's' : ''} on device`;
 
     let filter = 'all';
+    let tab = 'books';
     let selected = new Set();
 
     const render = () => {
+      if (tab === 'folders') { renderFoldersTab(); return; }
+
       const visible = books.filter(b => {
         if (filter === 'matched') return !!b.localBookId;
         if (filter === 'unmatched') return !b.localBookId;
@@ -719,6 +722,9 @@ async function openDeviceLibraryModal(deviceId) {
       $('dl-body').innerHTML = `
         <div class="dl-toolbar">
           <div class="dl-filters">
+            <button class="dl-tab-btn${tab === 'books' ? ' active' : ''}" data-tab="books">Books</button>
+            <button class="dl-tab-btn${tab === 'folders' ? ' active' : ''}" data-tab="folders">Folders</button>
+            <div class="dl-tab-sep"></div>
             <button class="dl-filter-btn${filter === 'all' ? ' active' : ''}" data-f="all">All (${books.length})</button>
             <button class="dl-filter-btn${filter === 'matched' ? ' active' : ''}" data-f="matched">In library (${books.filter(b => b.localBookId).length})</button>
             <button class="dl-filter-btn${filter === 'unmatched' ? ' active' : ''}" data-f="unmatched">Not in library (${books.filter(b => !b.localBookId).length})</button>
@@ -740,6 +746,7 @@ async function openDeviceLibraryModal(deviceId) {
             const importBtn = !b.localBookId
               ? `<button class="dl-action-btn dl-import" data-path="${escapeHtml(b.devicePath)}" title="Import to Folio library">↓ Library</button>` : '';
             const exportBtn = `<button class="dl-action-btn dl-export" data-path="${escapeHtml(b.devicePath)}" title="Export to folder">↑ Export</button>`;
+            const moveBtn = `<button class="dl-action-btn dl-move" data-path="${escapeHtml(b.devicePath)}" title="Move to folder">⇄ Move</button>`;
             const removeBtn = `<button class="dl-action-btn dl-remove" data-path="${escapeHtml(b.devicePath)}" title="Remove from device">🗑</button>`;
             return `<div class="dl-row${isSelected ? ' selected' : ''}" data-path="${escapeHtml(b.devicePath)}">
               <div class="dl-check${isSelected ? ' checked' : ''}" data-chk="${escapeHtml(b.devicePath)}">✓</div>
@@ -748,7 +755,7 @@ async function openDeviceLibraryModal(deviceId) {
                 ${author ? `<div class="dl-author">${author}</div>` : ''}
               </div>
               ${matchBadge}
-              <div class="dl-actions">${importBtn}${exportBtn}${removeBtn}</div>
+              <div class="dl-actions">${importBtn}${exportBtn}${moveBtn}${removeBtn}</div>
             </div>`;
           }).join('')}
           ${visible.length === 0 ? `<div class="folder-empty" style="padding:20px">No books match this filter</div>` : ''}
@@ -765,6 +772,7 @@ async function openDeviceLibraryModal(deviceId) {
           <span style="font-size:12px;color:var(--text2);margin-right:auto">${selected.size} selected</span>
           ${canImport ? `<button class="btn-ghost" id="dl-bulk-import">↓ Import to library</button>` : ''}
           <button class="btn-ghost" id="dl-bulk-export">↑ Export to folder</button>
+          <button class="btn-ghost" id="dl-bulk-move">⇄ Move to folder</button>
           <button class="danger-btn" id="dl-bulk-remove" style="width:auto;margin:0">Remove from device</button>`;
 
         if (canImport) {
@@ -788,6 +796,13 @@ async function openDeviceLibraryModal(deviceId) {
           if (r.ok) showToast('success', `Exported ${r.exported} book${r.exported !== 1 ? 's' : ''} to ${r.destDir.split('/').pop()}`);
           else showToast('error', 'Export failed');
         };
+        $('dl-bulk-move').onclick = () => openFolderPicker([...selected], null, async destFolder => {
+          const r = await window.folio.devices.moveBooks(deviceId, [...selected], destFolder);
+          const moved = r.results ? r.results.filter(x => x.ok).length : 0;
+          selected.clear();
+          showToast('success', `Moved ${moved} book${moved !== 1 ? 's' : ''}`);
+          await renderModal();
+        });
         $('dl-bulk-remove').onclick = async () => {
           if (!confirm(`Remove ${selected.size} book${selected.size !== 1 ? 's' : ''} from device? This cannot be undone.`)) return;
           let removed = 0;
@@ -808,6 +823,9 @@ async function openDeviceLibraryModal(deviceId) {
         foot.style.display = 'none';
       }
 
+      $('dl-body').querySelectorAll('.dl-tab-btn').forEach(btn => {
+        btn.onclick = () => { tab = btn.dataset.tab; selected.clear(); render(); };
+      });
       $('dl-body').querySelectorAll('.dl-filter-btn').forEach(btn => {
         btn.onclick = () => { filter = btn.dataset.f; render(); };
       });
@@ -853,6 +871,20 @@ async function openDeviceLibraryModal(deviceId) {
           }
         };
       });
+      $('dl-body').querySelectorAll('.dl-move').forEach(btn => {
+        btn.onclick = e => {
+          e.stopPropagation();
+          openFolderPicker([btn.dataset.path], null, async destFolder => {
+            const r = await window.folio.devices.moveBooks(deviceId, [btn.dataset.path], destFolder);
+            if (r.ok && r.results[0].ok) {
+              showToast('success', 'Moved');
+              await renderModal();
+            } else {
+              showToast('error', (r.results && r.results[0].error) || 'Move failed');
+            }
+          });
+        };
+      });
       $('dl-body').querySelectorAll('.dl-remove').forEach(btn => {
         btn.onclick = async e => {
           e.stopPropagation();
@@ -874,6 +906,143 @@ async function openDeviceLibraryModal(deviceId) {
           }
         };
       });
+    };
+
+    const renderFoldersTab = async () => {
+      $('dl-body').innerHTML = `
+        <div class="dl-toolbar">
+          <div class="dl-filters">
+            <button class="dl-tab-btn" data-tab="books">Books</button>
+            <button class="dl-tab-btn active" data-tab="folders">Folders</button>
+          </div>
+        </div>
+        <div class="dl-list" id="dl-folder-tree"><div class="folder-loading" style="padding:20px">Loading…</div></div>`;
+      $('dl-foot').style.display = 'none';
+
+      $('dl-body').querySelectorAll('.dl-tab-btn').forEach(btn => {
+        btn.onclick = () => { tab = btn.dataset.tab; selected.clear(); render(); };
+      });
+
+      const fr = await window.folio.devices.listAllFolders(deviceId);
+      if (!fr.ok || !fr.folders.length) {
+        $('dl-folder-tree').innerHTML = `<div class="folder-empty" style="padding:20px">No folders found on device</div>`;
+        return;
+      }
+
+      const renderTree = (folders, depth) => folders.map(f => {
+        const indent = depth * 16;
+        const isRoot = f.path === fr.root;
+        return `
+          <div class="dl-folder-row" style="padding-left:${16 + indent}px" data-fpath="${escapeHtml(f.path)}">
+            <span class="dl-folder-icon">📁</span>
+            <span class="dl-folder-name" data-fpath="${escapeHtml(f.path)}">${escapeHtml(isRoot ? '/ (root)' : f.name)}</span>
+            <span class="dl-folder-count">${f.bookCount} book${f.bookCount !== 1 ? 's' : ''}</span>
+            <div class="dl-folder-acts">
+              <button class="dl-action-btn dl-folder-new" data-fpath="${escapeHtml(f.path)}" title="New subfolder">+ Subfolder</button>
+              ${!isRoot ? `<button class="dl-action-btn dl-folder-rename" data-fpath="${escapeHtml(f.path)}" data-fname="${escapeHtml(f.name)}" title="Rename">Rename</button>` : ''}
+              ${!isRoot ? `<button class="dl-action-btn dl-folder-del" data-fpath="${escapeHtml(f.path)}" title="Delete folder">🗑</button>` : ''}
+            </div>
+          </div>
+          ${f.children && f.children.length ? renderTree(f.children, depth + 1) : ''}`;
+      }).join('');
+
+      $('dl-folder-tree').innerHTML = renderTree(fr.folders, 0);
+
+      $('dl-folder-tree').querySelectorAll('.dl-folder-new').forEach(btn => {
+        btn.onclick = async () => {
+          const name = prompt('New folder name:');
+          if (!name || !name.trim()) return;
+          const r = await window.folio.devices.createFolder(deviceId, btn.dataset.fpath, name.trim());
+          if (r.ok) { showToast('success', `Created "${name.trim()}"`); renderFoldersTab(); }
+          else showToast('error', r.error || 'Failed to create folder');
+        };
+      });
+      $('dl-folder-tree').querySelectorAll('.dl-folder-rename').forEach(btn => {
+        btn.onclick = async () => {
+          const name = prompt('Rename to:', btn.dataset.fname);
+          if (!name || !name.trim() || name.trim() === btn.dataset.fname) return;
+          const r = await window.folio.devices.renameFolder(deviceId, btn.dataset.fpath, name.trim());
+          if (r.ok) { showToast('success', 'Renamed'); renderFoldersTab(); }
+          else showToast('error', r.error || 'Failed to rename');
+        };
+      });
+      $('dl-folder-tree').querySelectorAll('.dl-folder-del').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm(`Delete folder "${btn.closest('.dl-folder-row').querySelector('.dl-folder-name').textContent}"? All books inside will also be deleted.`)) return;
+          const r = await window.folio.devices.deleteFolder(deviceId, btn.dataset.fpath);
+          if (r.ok) { showToast('success', 'Deleted'); await renderModal(); }
+          else showToast('error', r.error || 'Failed to delete');
+        };
+      });
+    };
+
+    const openFolderPicker = async (paths, currentFolder, onConfirm) => {
+      const fr = await window.folio.devices.listAllFolders(deviceId);
+      if (!fr.ok) { showToast('error', 'Cannot load folders'); return; }
+
+      const savedBody = $('dl-body').innerHTML;
+      const savedFoot = $('dl-foot').innerHTML;
+      const savedFootDisplay = $('dl-foot').style.display;
+
+      let pickedFolder = currentFolder || fr.root;
+
+      const renderPicker = () => {
+        const allFolders = [];
+        const flatten = (nodes) => nodes.forEach(n => { allFolders.push(n); if (n.children) flatten(n.children); });
+        flatten(fr.folders);
+
+        $('dl-body').innerHTML = `
+          <div class="dl-toolbar" style="border-bottom:1px solid var(--ink3);padding:10px 16px">
+            <span style="font-size:13px;color:var(--text)">Choose destination folder</span>
+          </div>
+          <div class="dl-list">
+            ${allFolders.map(f => {
+              const isRoot = f.path === fr.root;
+              const isSelected = pickedFolder === f.path;
+              return `<div class="dl-folder-row dl-folder-pick${isSelected ? ' picked' : ''}" data-fpath="${escapeHtml(f.path)}" style="padding-left:${16}px;cursor:pointer">
+                <span class="dl-folder-icon">📁</span>
+                <span>${escapeHtml(isRoot ? '/ (root)' : f.name)}</span>
+                <span class="dl-folder-count">${f.bookCount} book${f.bookCount !== 1 ? 's' : ''}</span>
+                ${isSelected ? '<span style="margin-left:auto;color:var(--pink2)">✓</span>' : ''}
+              </div>`;
+            }).join('')}
+          </div>`;
+
+        $('dl-foot').style.display = 'flex';
+        $('dl-foot').innerHTML = `
+          <button class="btn-ghost" id="fp-new-folder">+ New folder</button>
+          <button class="btn-ghost" id="fp-cancel" style="margin-left:auto">Cancel</button>
+          <button class="btn-primary" id="fp-confirm">Move here</button>`;
+
+        $('dl-body').querySelectorAll('.dl-folder-pick').forEach(row => {
+          row.onclick = () => { pickedFolder = row.dataset.fpath; renderPicker(); };
+        });
+        $('fp-new-folder').onclick = async () => {
+          const name = prompt('New folder name:');
+          if (!name || !name.trim()) return;
+          const r = await window.folio.devices.createFolder(deviceId, pickedFolder, name.trim());
+          if (r.ok) {
+            pickedFolder = r.path;
+            const refreshed = await window.folio.devices.listAllFolders(deviceId);
+            if (refreshed.ok) { fr.folders = refreshed.folders; fr.root = refreshed.root; }
+            renderPicker();
+          } else showToast('error', r.error || 'Failed');
+        };
+        $('fp-cancel').onclick = () => {
+          $('dl-body').innerHTML = savedBody;
+          $('dl-foot').innerHTML = savedFoot;
+          $('dl-foot').style.display = savedFootDisplay;
+          render();
+        };
+        $('fp-confirm').onclick = () => {
+          $('dl-body').innerHTML = savedBody;
+          $('dl-foot').innerHTML = savedFoot;
+          $('dl-foot').style.display = savedFootDisplay;
+          onConfirm(pickedFolder);
+        };
+      };
+
+      renderPicker();
     };
 
     render();

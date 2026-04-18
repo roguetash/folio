@@ -24,7 +24,12 @@ contextBridge.exposeInMainWorld('folio', {
     listBooks: (deviceId) => ipcRenderer.invoke('devices:list-books', deviceId),
     removeBook: (deviceId, devicePath) => ipcRenderer.invoke('devices:remove-book', { deviceId, devicePath }),
     importFromDevice: (devicePath) => ipcRenderer.invoke('devices:import-from-device', devicePath),
-    exportBooks: (devicePaths) => ipcRenderer.invoke('devices:export-books', devicePaths)
+    exportBooks: (devicePaths) => ipcRenderer.invoke('devices:export-books', devicePaths),
+    createFolder: (deviceId, parentPath, name) => ipcRenderer.invoke('devices:create-folder', { deviceId, parentPath, name }),
+    renameFolder: (deviceId, folderPath, newName) => ipcRenderer.invoke('devices:rename-folder', { deviceId, folderPath, newName }),
+    deleteFolder: (deviceId, folderPath) => ipcRenderer.invoke('devices:delete-folder', { deviceId, folderPath }),
+    moveBooks: (deviceId, devicePaths, destFolder) => ipcRenderer.invoke('devices:move-books', { deviceId, devicePaths, destFolder }),
+    listAllFolders: (deviceId) => ipcRenderer.invoke('devices:list-all-folders', deviceId)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

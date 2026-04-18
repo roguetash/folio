@@ -250,7 +250,23 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow:hi
 .dl-action-btn{background:none;border:1px solid var(--ink3);color:var(--text3);font-family:var(--sans);font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;transition:.12s;white-space:nowrap}
 .dl-import:hover{border-color:var(--mint);color:var(--mint)}
 .dl-export:hover{border-color:var(--lavender);color:var(--lavender)}
+.dl-move:hover{border-color:var(--gold);color:var(--gold)}
 .dl-remove:hover{border-color:var(--coral);color:var(--coral)}
+.dl-tab-btn{background:none;border:1px solid var(--ink3);color:var(--text3);font-family:var(--sans);font-size:12px;padding:4px 12px;border-radius:20px;cursor:pointer;transition:.15s;font-weight:600}
+.dl-tab-btn:hover{border-color:var(--lavender);color:var(--text2)}
+.dl-tab-btn.active{background:rgba(255,105,180,.12);border-color:var(--pink);color:var(--pink2)}
+.dl-tab-sep{width:1px;background:var(--ink3);margin:0 4px;align-self:stretch}
+.dl-folder-row{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.04);transition:.12s}
+.dl-folder-row:hover{background:rgba(255,255,255,.03)}
+.dl-folder-row.picked{background:rgba(255,105,180,.06);border-color:rgba(255,105,180,.2)}
+.dl-folder-pick{cursor:pointer}
+.dl-folder-icon{font-size:14px;flex-shrink:0}
+.dl-folder-name{font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-folder-count{font-size:10px;color:var(--text3);white-space:nowrap}
+.dl-folder-acts{display:flex;gap:4px;margin-left:auto;flex-shrink:0}
+.dl-folder-new:hover{border-color:var(--mint);color:var(--mint)}
+.dl-folder-rename:hover{border-color:var(--lavender);color:var(--lavender)}
+.dl-folder-del:hover{border-color:var(--coral);color:var(--coral)}
 .err-banner{padding:10px 12px;background:rgba(255,127,112,.1);border:1px solid rgba(255,127,112,.25);border-radius:8px;color:var(--coral);font-size:12px;margin-bottom:12px}
 .transfer-options{display:flex;gap:8px;margin-top:12px}
 .transfer-opt{flex:1;padding:10px 12px;background:var(--ink);border:1px solid var(--ink3);border-radius:10px;cursor:pointer;transition:.15s}

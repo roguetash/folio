@@ -558,6 +558,90 @@ ipcMain.handle('devices:export-books', async (e, devicePaths) => {
   return { ok: true, exported, errors, destDir };
 });
 
+ipcMain.handle('devices:create-folder', (e, { deviceId, parentPath, name }) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, error: 'Device not found' };
+  const newPath = path.join(parentPath, name.trim());
+  if (!newPath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+  try {
+    fs.mkdirSync(newPath, { recursive: true });
+    return { ok: true, path: newPath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('devices:rename-folder', (e, { deviceId, folderPath, newName }) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, error: 'Device not found' };
+  if (!folderPath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+  const newPath = path.join(path.dirname(folderPath), newName.trim());
+  try {
+    fs.renameSync(folderPath, newPath);
+    return { ok: true, newPath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('devices:delete-folder', (e, { deviceId, folderPath }) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, error: 'Device not found' };
+  if (!folderPath.startsWith(device.mount_path)) return { ok: false, error: 'Path outside device mount' };
+  if (folderPath === device.mount_path) return { ok: false, error: 'Cannot delete root mount' };
+  try {
+    fs.rmSync(folderPath, { recursive: true, force: true });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('devices:move-books', (e, { deviceId, devicePaths, destFolder }) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device) return { ok: false, error: 'Device not found' };
+  if (!destFolder.startsWith(device.mount_path)) return { ok: false, error: 'Destination outside device mount' };
+  try { fs.mkdirSync(destFolder, { recursive: true }); } catch {}
+  const results = [];
+  for (const srcPath of devicePaths) {
+    if (!srcPath.startsWith(device.mount_path)) { results.push({ ok: false, error: 'Path outside mount' }); continue; }
+    const destPath = path.join(destFolder, path.basename(srcPath));
+    try {
+      if (srcPath === destPath) { results.push({ ok: true }); continue; }
+      fs.renameSync(srcPath, destPath);
+      // Move .sdr alongside if it exists
+      const sdrSrc = srcPath + '.sdr', sdrDest = destPath + '.sdr';
+      if (fs.existsSync(sdrSrc)) try { fs.renameSync(sdrSrc, sdrDest); } catch {}
+      results.push({ ok: true, destPath });
+    } catch (err) {
+      results.push({ ok: false, error: err.message });
+    }
+  }
+  return { ok: true, results };
+});
+
+ipcMain.handle('devices:list-all-folders', (e, deviceId) => {
+  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!device || !device.mount_path || !fs.existsSync(device.mount_path)) return { ok: false, folders: [] };
+  const relFolder = (device.books_folder || '').replace(/^\/+/, '');
+  const scanRoot = relFolder ? path.join(device.mount_path, relFolder) : device.mount_path;
+  const BOOK_EXTS = new Set(['epub', 'mobi', 'azw3', 'kepub', 'pdf']);
+
+  const walk = (dirPath, depth) => {
+    if (depth > 4) return [];
+    let entries;
+    try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return []; }
+    const bookCount = entries.filter(e => !e.isDirectory() && BOOK_EXTS.has(path.extname(e.name).slice(1).toLowerCase())).length;
+    const children = entries
+      .filter(e => e.isDirectory() && !e.name.startsWith('.') && !e.name.endsWith('.sdr'))
+      .flatMap(e => walk(path.join(dirPath, e.name), depth + 1));
+    return [{ path: dirPath, name: path.basename(dirPath), bookCount, children }];
+  };
+
+  const tree = walk(scanRoot, 0);
+  return { ok: true, folders: tree, root: scanRoot };
+});
+
 ipcMain.handle('devices:scan-books', (e, deviceId) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, bookIds: [] };
