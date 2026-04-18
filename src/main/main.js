@@ -537,6 +537,27 @@ ipcMain.handle('devices:import-from-device', async (e, devicePath) => {
   return result;
 });
 
+ipcMain.handle('devices:export-books', async (e, devicePaths) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose export destination',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (canceled || !filePaths.length) return { ok: false, canceled: true };
+  const destDir = filePaths[0];
+  let exported = 0;
+  const errors = [];
+  for (const srcPath of devicePaths) {
+    const destPath = path.join(destDir, path.basename(srcPath));
+    try {
+      fs.copyFileSync(srcPath, destPath);
+      exported++;
+    } catch (err) {
+      errors.push({ file: path.basename(srcPath), error: err.message });
+    }
+  }
+  return { ok: true, exported, errors, destDir };
+});
+
 ipcMain.handle('devices:scan-books', (e, deviceId) => {
   const device = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
   if (!device) return { ok: false, bookIds: [] };

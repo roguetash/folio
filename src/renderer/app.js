@@ -738,7 +738,8 @@ async function openDeviceLibraryModal(deviceId) {
               ? `<span class="dl-badge dl-badge-in">in library</span>`
               : `<span class="dl-badge dl-badge-out">not in library</span>`;
             const importBtn = !b.localBookId
-              ? `<button class="dl-action-btn dl-import" data-path="${escapeHtml(b.devicePath)}" title="Import to library">↓ Import</button>` : '';
+              ? `<button class="dl-action-btn dl-import" data-path="${escapeHtml(b.devicePath)}" title="Import to Folio library">↓ Library</button>` : '';
+            const exportBtn = `<button class="dl-action-btn dl-export" data-path="${escapeHtml(b.devicePath)}" title="Export to folder">↑ Export</button>`;
             const removeBtn = `<button class="dl-action-btn dl-remove" data-path="${escapeHtml(b.devicePath)}" title="Remove from device">🗑</button>`;
             return `<div class="dl-row${isSelected ? ' selected' : ''}" data-path="${escapeHtml(b.devicePath)}">
               <div class="dl-check${isSelected ? ' checked' : ''}" data-chk="${escapeHtml(b.devicePath)}">✓</div>
@@ -747,7 +748,7 @@ async function openDeviceLibraryModal(deviceId) {
                 ${author ? `<div class="dl-author">${author}</div>` : ''}
               </div>
               ${matchBadge}
-              <div class="dl-actions">${importBtn}${removeBtn}</div>
+              <div class="dl-actions">${importBtn}${exportBtn}${removeBtn}</div>
             </div>`;
           }).join('')}
           ${visible.length === 0 ? `<div class="folder-empty" style="padding:20px">No books match this filter</div>` : ''}
@@ -763,6 +764,7 @@ async function openDeviceLibraryModal(deviceId) {
         foot.innerHTML = `
           <span style="font-size:12px;color:var(--text2);margin-right:auto">${selected.size} selected</span>
           ${canImport ? `<button class="btn-ghost" id="dl-bulk-import">↓ Import to library</button>` : ''}
+          <button class="btn-ghost" id="dl-bulk-export">↑ Export to folder</button>
           <button class="danger-btn" id="dl-bulk-remove" style="width:auto;margin:0">Remove from device</button>`;
 
         if (canImport) {
@@ -779,6 +781,13 @@ async function openDeviceLibraryModal(deviceId) {
             await renderModal();
           };
         }
+        $('dl-bulk-export').onclick = async () => {
+          const paths = [...selected];
+          const r = await window.folio.devices.exportBooks(paths);
+          if (r.canceled) return;
+          if (r.ok) showToast('success', `Exported ${r.exported} book${r.exported !== 1 ? 's' : ''} to ${r.destDir.split('/').pop()}`);
+          else showToast('error', 'Export failed');
+        };
         $('dl-bulk-remove').onclick = async () => {
           if (!confirm(`Remove ${selected.size} book${selected.size !== 1 ? 's' : ''} from device? This cannot be undone.`)) return;
           let removed = 0;
@@ -829,6 +838,18 @@ async function openDeviceLibraryModal(deviceId) {
           } else {
             btn.textContent = '↓ Import';
             btn.disabled = false;
+          }
+        };
+      });
+      $('dl-body').querySelectorAll('.dl-export').forEach(btn => {
+        btn.onclick = async e => {
+          e.stopPropagation();
+          btn.textContent = '…'; btn.disabled = true;
+          const r = await window.folio.devices.exportBooks([btn.dataset.path]);
+          btn.textContent = '↑ Export'; btn.disabled = false;
+          if (!r.canceled) {
+            if (r.ok && r.exported) showToast('success', `Saved to ${r.destDir.split('/').pop()}`);
+            else if (r.errors && r.errors.length) showToast('error', r.errors[0].error);
           }
         };
       });

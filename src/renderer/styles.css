@@ -249,6 +249,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow:hi
 .dl-actions{display:flex;gap:5px;flex-shrink:0}
 .dl-action-btn{background:none;border:1px solid var(--ink3);color:var(--text3);font-family:var(--sans);font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;transition:.12s;white-space:nowrap}
 .dl-import:hover{border-color:var(--mint);color:var(--mint)}
+.dl-export:hover{border-color:var(--lavender);color:var(--lavender)}
 .dl-remove:hover{border-color:var(--coral);color:var(--coral)}
 .err-banner{padding:10px 12px;background:rgba(255,127,112,.1);border:1px solid rgba(255,127,112,.25);border-radius:8px;color:var(--coral);font-size:12px;margin-bottom:12px}
 .transfer-options{display:flex;gap:8px;margin-top:12px}

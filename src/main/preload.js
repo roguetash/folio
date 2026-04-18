@@ -23,7 +23,8 @@ contextBridge.exposeInMainWorld('folio', {
     scanBooks: (deviceId) => ipcRenderer.invoke('devices:scan-books', deviceId),
     listBooks: (deviceId) => ipcRenderer.invoke('devices:list-books', deviceId),
     removeBook: (deviceId, devicePath) => ipcRenderer.invoke('devices:remove-book', { deviceId, devicePath }),
-    importFromDevice: (devicePath) => ipcRenderer.invoke('devices:import-from-device', devicePath)
+    importFromDevice: (devicePath) => ipcRenderer.invoke('devices:import-from-device', devicePath),
+    exportBooks: (devicePaths) => ipcRenderer.invoke('devices:export-books', devicePaths)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
